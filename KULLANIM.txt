@@ -1,0 +1,310 @@
+==============================================================================
+ ANALIZBOT - KULLANIM KILAVUZU (kripto analiz & sinyal botu)
+==============================================================================
+ Bu bot Binance'teki kripto ciftlerini analiz edip AL / SAT / BEKLE
+ (BUY / SELL / HOLD) sinyali + teknik analiz raporu uretir.
+ ONEMLI: Bot GERCEK EMIR GONDERMEZ, bakiyeye/paraya dokunmaz. Sadece okur,
+ hesaplar, gerekceli oneri sunar. Yatirim tavsiyesi DEGILDIR.
+
+ Proje klasoru: C:\Users\arsla\Desktop\analizbot
+
+
+------------------------------------------------------------------------------
+ 0) NASIL BASLATILIR (her seferinde)
+------------------------------------------------------------------------------
+ 1. Terminali (PowerShell) ac.
+ 2. Proje klasorune gir ve sanal ortami etkinlestir:
+
+      cd C:\Users\arsla\Desktop\analizbot
+      .\.venv\Scripts\activate
+
+    (Satir basinda "(.venv)" gorunur. Cikmak icin: deactivate)
+
+ 3. Komutlar soyle calisir:
+
+      python -m src.app.cli <komut> [secenekler]
+
+    Tum komutlari gormek:   python -m src.app.cli --help
+
+ NOT: Sistemde python artik 3.12. Yine de bu projede DAIMA .venv kullan.
+
+
+------------------------------------------------------------------------------
+ 1) analyze  ->  TEK SEFERLIK ANALIZ
+------------------------------------------------------------------------------
+ Bir cift icin anlik, gerekceli BUY/SELL/HOLD raporu uretir.
+
+   python -m src.app.cli analyze BTC/USDT
+
+ SECENEKLER:
+   --timeframe, -t   Mum periyodu (varsayilan: config.yaml -> 1h)
+   --limit,     -l   Kac mum cekilsin (varsayilan: 500)
+   --strategy,  -S   Strateji sec: ema_rsi | confluence | ml (bossa config)
+   --no-save         Sinyali veritabanina YAZMA (normalde kaydeder)
+
+ ORNEKLER:
+   python -m src.app.cli analyze ETH/USDT -t 4h          (4 saatlik mum)
+   python -m src.app.cli analyze BTC/USDT -t 1d          (gunluk mum)
+   python -m src.app.cli analyze SOL/USDT -t 15m -l 300  (15 dk, 300 mum)
+   python -m src.app.cli analyze BTC/USDT --no-save      (kaydetmeden)
+
+
+------------------------------------------------------------------------------
+ TIMEFRAME (mum periyodu) - SEN SECIYORSUN
+------------------------------------------------------------------------------
+ Binance'in destekledigi her aralik kullanilabilir:
+
+   1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w, 1M
+
+ (m=dakika, h=saat, d=gun, w=hafta, M=ay)
+
+
+------------------------------------------------------------------------------
+ "500 MUM" NE DEMEK? (--limit)
+------------------------------------------------------------------------------
+ 500 = cekilecek MUM SAYISI. Kapsadigi SURE timeframe'e baglidir:
+
+     500 x  1h  ~= 21 gun
+     500 x  4h  ~= 83 gun
+     500 x  1d  ~= 500 gun
+
+ - Strateji yalniz SON bara bakarak karar verir; ama 500 mum,
+   indikatorlerin (EMA26, RSI14, ATR14) dogru isinmasi icin fazlasiyla yeter.
+ - Daha cok gecmis icin: -l 1000  (Binance tek istekte ~1000 mum verir;
+   analyze tek istek yapar, bu yuzden pratik ust sinir ~1000).
+ - Cok daha uzun gecmis test = backtest komutu (o sayfalama yapar).
+
+
+------------------------------------------------------------------------------
+ 2) symbols  ->  HANGI CIFTLERI SORABILIRIM?
+------------------------------------------------------------------------------
+ Binance spot'taki HER cifti sorabilirsin. Format her zaman: TABAN/KARSIT
+ Ornek: BTC/USDT, ETH/USDT, ETH/BTC, SOL/USDT, AVAX/USDT ...
+ (USDT karsitli ~669 cift var; toplamda binlerce.)
+
+ Hangileri oldugunu listelemek icin:
+
+   python -m src.app.cli symbols --quote USDT      (tum USDT ciftleri, ilk 40)
+   python -m src.app.cli symbols -q USDT -l 0       (USDT ciftlerinin HEPSI)
+   python -m src.app.cli symbols --search PEPE      (icinde PEPE gecenler)
+   python -m src.app.cli symbols -q BTC -s SOL      (BTC karsitli + SOL iceren)
+
+ SECENEKLER:
+   --quote,  -q   Karsit paraya gore suz (USDT, BTC, ETH...)
+   --search, -s   Sembolde gecen metne gore suz
+   --limit,  -l   Kac sonuc gosterilsin (0 = hepsi)
+
+ NOT: Olmayan bir sembol sorarsan (orn. FOO/BAR) bot net hata verir.
+      Once "symbols" ile dogru yazimi bulabilirsin.
+
+
+------------------------------------------------------------------------------
+ 3) watch  ->  SUREKLI IZLEME
+------------------------------------------------------------------------------
+ config.yaml'daki izleme listesini periyodik tarar; sinyal DEGISINCE bildirir.
+
+   python -m src.app.cli watch          (surekli izle - Ctrl+C ile durdur)
+   python -m src.app.cli watch --once   (tek tarama yapip cik)
+
+ - Hangi semboller / hangi aralik / hangi timeframe? -> config.yaml belirler.
+ - Yalniz sinyal degisiminde (BUY<->SELL<->HOLD) bildirir; degismezse sessiz.
+ - Telegram aciksa oraya da mesaj atar (bkz. bolum 7).
+
+
+------------------------------------------------------------------------------
+ 4) backtest  ->  GECMISTE TEST
+------------------------------------------------------------------------------
+ Stratejiyi gecmis veride simule eder; ozet metrik uretir (look-ahead yok).
+
+   python -m src.app.cli backtest BTC/USDT --from 2024-01-01 --to 2024-06-30 -t 4h
+
+ SECENEKLER:
+   --from        Baslangic tarihi YYYY-MM-DD  (ZORUNLU)
+   --to          Bitis tarihi    YYYY-MM-DD   (ZORUNLU)
+   --timeframe,-t Mum periyodu (varsayilan: config -> 1h)
+   --commission  Komisyon orani (0.001 = %0.1)   (varsayilan 0.001)
+   --slippage    Kayma orani                      (varsayilan 0.0005)
+
+ Cikti: toplam getiri %, islem sayisi, kazanma orani, ortalama R,
+        maksimum drawdown, basit Sharpe.
+ NOT: Uzun aralik + dusuk timeframe yavas olabilir; -t 4h / 1d hizlidir.
+
+
+------------------------------------------------------------------------------
+ 5) CIKTILAR NEREDE?
+------------------------------------------------------------------------------
+ - Konsola renkli rapor basilir.
+ - Her sinyal proje kokundeki  signals.db  (SQLite) dosyasina yazilir.
+   Son 10 sinyali gormek icin:
+
+   python -c "import sqlite3;[print(r) for r in sqlite3.connect('signals.db').execute('select symbol,action,confidence,timeframe,created_at from signals order by id desc limit 10')]"
+
+
+------------------------------------------------------------------------------
+ 6) VARSAYILANLARI AYARLAMA  ->  config.yaml
+------------------------------------------------------------------------------
+ Izleme listesi, varsayilan timeframe, tarama sikligi ve strateji esikleri:
+
+   watchlist: [BTC/USDT, ETH/USDT, SOL/USDT]   # izlenecek ciftler
+   timeframe: 1h                                # varsayilan periyot
+   scan_interval_minutes: 15                    # watch kac dakikada bir tarar
+   strategies:
+     ema_rsi:
+       rsi_overbought: 70    # esikleri buradan oynarsin
+       rsi_oversold: 30
+       atr_stop_mult: 1.5    # stop = giris -/+ 1.5*ATR
+       atr_tp_mult: 3.0      # hedef = giris +/- 3*ATR
+
+ NOT: Komutta -t verince o komut icin config timeframe'ini gecersiz kilarsin.
+
+
+------------------------------------------------------------------------------
+ 7) TELEGRAM BILDIRIMI (opsiyonel)
+------------------------------------------------------------------------------
+ 1. Telegram'da @BotFather ile bot olustur -> token al.
+ 2. Bota bir mesaj at, chat_id'ni ogren.
+ 3. .env dosyasina ekle:
+        TELEGRAM_BOT_TOKEN=123456:ABC...
+        TELEGRAM_CHAT_ID=987654321
+ 4. config.yaml'da:  notify: { telegram: true }
+ Artik watch modunda sinyal degisince Telegram'a da dususr. Token yoksa
+ sessizce sadece konsola yazar.
+
+
+------------------------------------------------------------------------------
+ 8) GIZLI AYARLAR  ->  .env
+------------------------------------------------------------------------------
+ .env dosyasi gizli ayarlari tutar (git'e GIRMEZ). Sablon: .env.example
+   BINANCE_API_KEY=     # GEREKMEZ; genel veri anahtarsiz calisir.
+   BINANCE_API_SECRET=  # Kullanilirsa SADECE read-only olmali.
+   TELEGRAM_BOT_TOKEN=
+   TELEGRAM_CHAT_ID=
+   LOG_LEVEL=INFO
+   DB_URL=sqlite:///signals.db
+
+
+------------------------------------------------------------------------------
+ 9) STRATEJILER (--strategy / config active_strategy)
+------------------------------------------------------------------------------
+ ema_rsi     : Basit, hizli. EMA trend + RSI + MACD. Varsayilan.
+ confluence  : Gelismis. ema_rsi + ADX (trend gucu) + Bollinger + hacim/OBV
+               + COK ZAMAN DILIMLI onay (1h sinyalini 4h trendiyle teyit eder).
+               Daha az ama daha "teyitli" sinyal uretir.
+ ml          : Makine ogrenmesi. ONCE 'train' ile model egitmen gerekir.
+               Egitilmis model yoksa HOLD doner.
+
+ Ornek:  python -m src.app.cli analyze BTC/USDT --strategy confluence -t 4h
+
+
+------------------------------------------------------------------------------
+ 10) screen  ->  TUM PIYASAYI TARA (firsat bulucu)
+------------------------------------------------------------------------------
+ Bircok pariteyi tarar, sinyalleri guven skoruna gore siralar.
+
+   python -m src.app.cli screen --quote USDT -m 30
+   python -m src.app.cli screen -q USDT -m 50 -t 4h --strategy confluence
+   python -m src.app.cli screen -q USDT -m 20 --include-hold
+
+ SECENEKLER:
+   --quote, -q       Karsit para (varsayilan USDT)
+   --max-symbols,-m  Taranacak en fazla parite (0=hepsi; rate-limit'e dikkat)
+   --timeframe, -t   Mum periyodu
+   --top             Her yonde kac sonuc gosterilsin (varsayilan 10)
+   --strategy, -S    Strateji
+   --include-hold    HOLD'lari da goster
+
+ NOT: Cok parite = cok istek = yavas. Once -m 20-50 ile dene.
+
+
+------------------------------------------------------------------------------
+ 11) train  ->  ML MODELI EGIT (ml stratejisi icin)
+------------------------------------------------------------------------------
+ Gecmis veriyle bir model egitir, models/ klasorune kaydeder. Sonra ml
+ stratejisi bu modeli kullanir.
+
+   python -m src.app.cli train BTC/USDT --from 2024-01-01 --to 2024-12-31 -t 4h
+   python -m src.app.cli analyze BTC/USDT --strategy ml -t 4h
+
+ SECENEKLER (YENI):
+   --model, -M     Model tipi: rf | hgb | lgbm | xgb   (bossa config: rf)
+                     rf=RandomForest, hgb=HistGradientBoosting (ek paket yok),
+                     lgbm=LightGBM, xgb=XGBoost (daha guclu gradient boosting).
+   --tune          Hiperparametre aramasi yap (TimeSeriesSplit ile, yavas).
+   --calibrate     Olasilik kalibrasyonu (guven skoru daha guvenilir olur).
+   --cv-splits     Walk-forward CV kat sayisi (varsayilan 5).
+
+ ORNEK:
+   python -m src.app.cli train BTC/USDT --from 2024-01-01 --to 2024-12-31 -t 4h \
+       --model lgbm --tune --calibrate
+
+ - Model dosyasi sembol + timeframe'e ozeldir (orn ml_BTC_USDT_4h.joblib).
+   Hangi timeframe'de tahmin edeceksen, o timeframe'de egitmelisin.
+ - Cikti: test dogrulugu + WALK-FORWARD CV dogrulugu/F1 (daha durust olcum) +
+   EN ONEMLI 10 OZELLIK (hangi analiz tahmine en cok katki sagliyor).
+ - Ozellikler genisledi: RSI/MACD/ADX yaninda Stochastic, StochRSI, MFI, CCI,
+   Williams %R, Supertrend, VWAP, Keltner, mum formasyonlari + saat/gun.
+ - UYARI: Kripto cok gurultuludur; ML'in temel cizgiyi gecmesi kolay degildir.
+   Sonuclara temkinli yaklas, asiri guvenme.
+ - Ayarlar config.yaml -> strategies.ml (model_type, tune, calibrate, cv_splits,
+   horizon, threshold_pct, n_estimators ve indikator periyotlari).
+
+
+------------------------------------------------------------------------------
+ 12) evaluate  ->  SINYAL SONUCLARINI COZ (botun ogrenmesi)
+------------------------------------------------------------------------------
+ Gecmiste uretilmis BUY/SELL sinyallerinin TUTUP TUTMADIGINI gecmis veriyle
+ olcer (stop mu hedef mi doldu) ve sonucu signals.db'ye yazar. Bu, botun
+ "ogrenme" verisini toplar.
+
+   python -m src.app.cli evaluate
+   python -m src.app.cli evaluate --horizon 72   (en fazla 72 bar takip et)
+
+ - Yeterli gecmis bar olusmamis sinyaller "acik" kalir, sonraki cagrida
+   tekrar denenir. Periyodik calistirmak mantiklidir (orn gunde bir).
+ - Ufuk (kac bar takip) config.yaml -> learning.eval_horizon_bars (varsayilan 48).
+
+
+------------------------------------------------------------------------------
+ 13) performance  ->  BASARI ISTATISTIGI
+------------------------------------------------------------------------------
+ Cozulmus sinyallerin isabet oranini, ortalama R'sini ve Brier skorunu
+ (guven kalibrasyon kalitesi; dusuk = iyi) strateji/sembol kirilimda gosterir.
+
+   python -m src.app.cli performance
+   python -m src.app.cli performance -S confluence
+   python -m src.app.cli performance -s BTC/USDT
+
+ KALIBRASYON (gecmisten ogrenme):
+   analyze/screen/watch komutlarina --calibrate eklersen, gecmis isabete gore
+   guven skoru ayarlanir (orn ham %80 ama o guvende gecmis isabet %55 ise dusurur).
+   Yeterli cozulmus sinyal birikene dek (learning.min_samples_for_calibration,
+   varsayilan 30) ham skor kullanilir.
+
+   python -m src.app.cli analyze BTC/USDT --calibrate
+
+
+------------------------------------------------------------------------------
+ HIZLI ORNEK SENARYOLAR
+------------------------------------------------------------------------------
+ # BTC gunluk grafikte ne diyor?
+ python -m src.app.cli analyze BTC/USDT -t 1d
+
+ # Hangi USDT ciftleri var, PEPE'liler neler?
+ python -m src.app.cli symbols -q USDT -s PEPE -l 0
+
+ # Birden cok coini surekli izle, degisince haber ver
+ #   (once config.yaml -> watchlist'i duzenle, sonra:)
+ python -m src.app.cli watch
+
+ # Bu strateji ETH'de 2024'te tutar miydi?
+ python -m src.app.cli backtest ETH/USDT --from 2024-01-01 --to 2024-12-31 -t 4h
+
+ # OGRENME DONGUSU: sinyal uret -> sonuclari coz -> performansa bak -> kalibre et
+ python -m src.app.cli screen -q USDT -m 30        # sinyaller DB'ye yazilir
+ python -m src.app.cli evaluate                    # sonuclari coz (gun gun birikir)
+ python -m src.app.cli performance                 # isabet / R / Brier
+ python -m src.app.cli analyze BTC/USDT --calibrate  # gecmise gore kalibre guven
+
+==============================================================================
+ Detayli aciklama icin: README.md  |  Sorumluluk reddi: yatirim tavsiyesi degildir.
+==============================================================================

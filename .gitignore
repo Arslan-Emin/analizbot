@@ -1,0 +1,28 @@
+# Gizli anahtarlar — asla commit edilmez
+.env
+
+# Veritabanı / üretilen veriler
+*.db
+*.sqlite
+*.sqlite3
+results/
+*.log
+
+# Eğitilmiş ML modelleri (yeniden üretilebilir; repoya konmaz)
+models/
+*.joblib
+
+# Python sanal ortamı ve cache'ler
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

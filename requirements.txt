@@ -1,0 +1,35 @@
+# Kripto Analiz & Sinyal Botu - Python bağımlılıkları (kesin sürümler).
+# Python 3.12 venv'inde kurulup test edildi; tekrarlanabilirlik için pinlenmiştir.
+# Güncellerken: sürümü değiştir, "pip install -r requirements.txt", testleri çalıştır.
+
+# --- Borsa / veri çekme ---
+ccxt==4.5.58            # Binance OHLCV + ticker (pure-Python, exchange soyutlaması)
+
+# --- Veri işleme ---
+pandas==2.3.3           # OHLCV DataFrame + indikatör hesapları
+numpy==2.4.6            # sayısal taban (pandas ile birlikte)
+
+# --- Konfig & doğrulama ---
+pydantic==2.13.4        # tip-güvenli ayar modelleri
+pydantic-settings==2.14.1   # .env okuma (BaseSettings)
+PyYAML==6.0.3           # config.yaml (strateji parametreleri)
+
+# --- Kalıcılık ---
+SQLAlchemy==2.0.50      # SQLite sinyal/tarama geçmişi (ORM)
+
+# --- Bildirim & CLI çıktısı ---
+rich==14.3.4            # renkli konsol tablosu
+typer==0.26.7           # analyze/watch/backtest komutları (tip-ipucu odaklı CLI)
+python-telegram-bot[job-queue]==22.8   # opsiyonel Telegram bildirimi (APScheduler'ı da getirir)
+
+# --- Zamanlama (watch modu) ---
+APScheduler==3.11.2     # periyodik watchlist taraması
+
+# --- Dayanıklılık ---
+tenacity==9.1.4         # ağ/borsa hatalarında exponential-backoff retry
+
+# --- Makine öğrenmesi (ml stratejisi) ---
+scikit-learn==1.9.0     # RandomForest / HistGradientBoosting + CV, kalibrasyon
+joblib==1.5.3           # eğitilmiş model kaydı/yüklemesi
+lightgbm==4.6.0         # gradient boosting modeli (model_type: lgbm)
+xgboost==3.2.0          # gradient boosting modeli (model_type: xgb)

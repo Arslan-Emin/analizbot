@@ -1,0 +1,97 @@
+# Gizli OLMAYAN proje ayarları (sırlar .env'de durur).
+# Strateji parametreleri, izleme listesi ve tarama aralığı buradan gelir.
+
+exchange: binance
+quote_currency: USDT          # kripto'da fiyatlama birimi (ABD borsasında USD olur)
+
+# Watch modunda periyodik taranacak semboller
+watchlist:
+  - BTC/USDT
+  - ETH/USDT
+  - SOL/USDT
+
+timeframe: 1h                 # varsayılan mum periyodu
+scan_interval_minutes: 15     # watch modu kaç dakikada bir tarar
+active_strategy: ema_rsi      # şu an aktif strateji
+
+# Strateji parametreleri (spec §6). EmaRsiStrategy bunları okur.
+strategies:
+  ema_rsi:
+    ema_fast: 12              # hızlı EMA periyodu
+    ema_slow: 26              # yavaş EMA periyodu
+    rsi_period: 14
+    rsi_overbought: 70        # bu üstü = aşırı alım
+    rsi_oversold: 30          # bu altı = aşırı satım
+    atr_period: 14
+    atr_stop_mult: 1.5        # stop = giriş ∓ 1.5*ATR
+    atr_tp_mult: 3.0          # hedef = giriş ± 3*ATR (R:R ~ 1:2)
+    risk_per_trade_pct: 1.0   # örnek pozisyon boyutu için işlem başı risk %
+    hypothetical_capital_quote: 1000   # USDT — SADECE örnek boyutlama için (gerçek bakiye değil)
+
+  # Gelişmiş çok-koşullu strateji (ADX + Bollinger + hacim + çok zaman dilimli onay).
+  # Kullanmak için yukarıda: active_strategy: confluence
+  confluence:
+    ema_fast: 12
+    ema_slow: 26
+    rsi_period: 14
+    rsi_overbought: 70
+    rsi_oversold: 30
+    atr_period: 14
+    atr_stop_mult: 1.5
+    atr_tp_mult: 3.0
+    adx_period: 14
+    adx_min: 20             # ADX bu üstüyse "güçlü trend" sayılır
+    bb_period: 20
+    bb_std: 2.0
+    use_mtf: true           # üst zaman dilimi onayını aç/kapa
+    htf_rule: 4h            # ana trend teyidi için üst periyot (1h -> 4h)
+    min_confluence: 3       # BUY/SELL için gereken en az onay (7 üzerinden)
+    risk_per_trade_pct: 1.0
+    hypothetical_capital_quote: 1000
+
+  # Makine öğrenmesi stratejisi. Önce 'train' ile model eğit, sonra:
+  #   active_strategy: ml   (veya analyze --strategy ml)
+  ml:
+    ema_fast: 12
+    ema_slow: 26
+    rsi_period: 14
+    atr_period: 14
+    adx_period: 14
+    bb_period: 20
+    bb_std: 2.0
+    horizon: 8              # kaç bar ilerisini tahmin et
+    threshold_pct: 1.5      # AL/SAT eşiği (±%)
+    n_estimators: 200       # ağaç/iterasyon sayısı
+    model_dir: models       # eğitilmiş modellerin klasörü
+    # --- Model seçimi & doğrulama (Bölüm C) ---
+    model_type: rf          # rf | hgb | lgbm | xgb
+    cv_splits: 5            # walk-forward (TimeSeriesSplit) kat sayısı
+    tune: false            # hiperparametre araması (RandomizedSearchCV)
+    calibrate: false       # olasılık kalibrasyonu (CalibratedClassifierCV)
+    # --- Yeni indikatör periyotları (ML özellikleri) ---
+    stoch_k: 14
+    stoch_d: 3
+    stoch_smooth: 3
+    mfi_period: 14
+    cci_period: 20
+    williams_period: 14
+    supertrend_period: 10
+    supertrend_mult: 3.0
+    vwap_window: 20
+    keltner_period: 20
+    keltner_mult: 2.0
+    atr_stop_mult: 1.5
+    atr_tp_mult: 3.0
+    risk_per_trade_pct: 1.0
+    hypothetical_capital_quote: 1000
+
+# Öğrenme / geri besleme döngüsü (evaluate & --calibrate komutları okur)
+learning:
+  eval_horizon_bars: 48          # bir sinyal en fazla kaç bar takip edilip çözülür
+  min_samples_for_calibration: 30  # kalibratör aktifleşmeden önce gereken çözülmüş sinyal
+  calibration_bins: 10           # güven kovası sayısı
+
+# Bildirim kanalları
+notify:
+  console: true              # her zaman açık
+  telegram: false            # .env'de token varsa true yap
