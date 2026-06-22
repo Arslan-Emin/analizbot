@@ -83,11 +83,64 @@ class CcxtBinanceData(MarketDataProvider):
         return sorted(markets.keys())
 
     @_retry_network
+    def top_symbols_by_volume(self, quote: str = "USDT", n: int = 30) -> list[str]:
+        """Verilen karşıt paradaki spot çiftleri 24s quote-hacmine göre sıralar.
+
+        Breadth (piyasa genişliği) hesabı için likit semboller gerekir; alfabetik
+        ilk N yanıltıcı olur. `fetch_tickers` tek istekte tüm tickerları getirir.
+        Hata olursa (örn. desteklenmiyor) çağıran taraf alfabetiğe düşebilir.
+        """
+        suffix = "/" + quote.upper()
+        tickers = self._exchange.fetch_tickers()
+        rows = [
+            (sym, float((t or {}).get("quoteVolume") or 0.0))
+            for sym, t in tickers.items()
+            if ":" not in sym and sym.endswith(suffix)
+        ]
+        rows.sort(key=lambda kv: kv[1], reverse=True)
+        return [sym for sym, _ in rows[:n]]
+
+    @_retry_network
     def _fetch_ohlcv_page(
         self, symbol: str, timeframe: str, since_ms: int, page_limit: int
     ) -> list[list]:
         return self._exchange.fetch_ohlcv(
             symbol, timeframe=timeframe, since=since_ms, limit=page_limit
+        )
+
+    # --- Türev (perpetual) verisi: funding rate + open interest ---------------
+    # NOT: Spot sembolde funding/OI YOKTUR; USDM perpetual sembolü gerekir
+    # (BTC/USDT → BTC/USDT:USDT). Çağıran taraf src.core.derivatives.to_perp_symbol
+    # ile dönüştürür. ccxt bu sembolleri otomatik fapi'ye yönlendirir.
+
+    @_retry_network
+    def fetch_funding_rate(self, perp_symbol: str) -> dict:
+        """Perpetual sözleşmenin anlık funding rate'i (ham ccxt yapısı)."""
+        return self._exchange.fetch_funding_rate(perp_symbol)
+
+    @_retry_network
+    def fetch_open_interest(self, perp_symbol: str) -> dict:
+        """Perpetual açık pozisyon (open interest) anlık değeri (ham ccxt yapısı)."""
+        return self._exchange.fetch_open_interest(perp_symbol)
+
+    @_retry_network
+    def fetch_funding_rate_history(
+        self, perp_symbol: str, since_ms: int | None = None, limit: int = 1000
+    ) -> list[dict]:
+        """Funding rate geçmişi (8 saatlik). Binance yıllarca geriye veri verir."""
+        return self._exchange.fetch_funding_rate_history(perp_symbol, since=since_ms, limit=limit)
+
+    @_retry_network
+    def fetch_open_interest_history(
+        self,
+        perp_symbol: str,
+        timeframe: str = "8h",
+        since_ms: int | None = None,
+        limit: int = 30,
+    ) -> list[dict]:
+        """Open interest geçmişi. UYARI: Binance yalnızca son ~30 günü verir."""
+        return self._exchange.fetch_open_interest_history(
+            perp_symbol, timeframe, since=since_ms, limit=limit
         )
 
     def fetch_ohlcv_range(

@@ -9,12 +9,14 @@ from __future__ import annotations
 from src.strategies.base import Strategy
 from src.strategies.confluence import ConfluenceStrategy
 from src.strategies.ema_rsi import EmaRsiStrategy
+from src.strategies.ensemble import EnsembleStrategy
 from src.strategies.ml_strategy import MlStrategy
 
 _STRATEGIES: dict[str, type[Strategy]] = {
     "ema_rsi": EmaRsiStrategy,
     "confluence": ConfluenceStrategy,
     "ml": MlStrategy,
+    "ensemble": EnsembleStrategy,
 }
 
 

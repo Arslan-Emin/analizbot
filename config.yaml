@@ -85,6 +85,105 @@ strategies:
     risk_per_trade_pct: 1.0
     hypothetical_capital_quote: 1000
 
+  # Ensemble: ema_rsi + confluence + ml'i ağırlıklı oyla birleştirir.
+  # Kullanmak için: active_strategy: ensemble  (veya analyze -S ensemble)
+  ensemble:
+    # Üyeler ve ağırlıkları. dynamic_weight: true ise CLI ağırlıkları geçmiş
+    # isabete göre ezer (performance verisi gerektirir).
+    members:
+      - {name: ema_rsi, weight: 1.0}
+      - {name: confluence, weight: 1.2}
+      - {name: ml, weight: 1.0}
+    min_agreement: 2        # BUY/SELL için en az kaç üye aynı yönde olmalı
+    dynamic_weight: false   # true → ağırlıklar geçmiş hit_rate'e göre ayarlanır
+    # Üyelere geçen paylaşılan indikatör/seviye parametreleri:
+    ema_fast: 12
+    ema_slow: 26
+    rsi_period: 14
+    rsi_overbought: 70
+    rsi_oversold: 30
+    atr_period: 14
+    adx_period: 14
+    adx_min: 20
+    bb_period: 20
+    bb_std: 2.0
+    use_mtf: true
+    htf_rule: 4h
+    min_confluence: 3
+    horizon: 8
+    threshold_pct: 1.5
+    model_dir: models
+    atr_stop_mult: 1.5
+    atr_tp_mult: 3.0
+    risk_per_trade_pct: 1.0
+    hypothetical_capital_quote: 1000
+
+# Piyasa rejimi filtresi (regime komutu + analyze/screen/backtest --regime).
+# Sinyalleri makro bağlama göre kapılar: ayı rejiminde BUY, boğa rejiminde SELL
+# zayıflatılır (soft) veya elenir (gate). Varsayılan KAPALI → mevcut davranış aynı.
+regime:
+  enable: false           # true → analyze/screen/backtest'te varsayılan açık
+  mode: soft              # soft (güveni düşür) | gate (HOLD'a düşür)
+  penalty: 0.5            # soft modda karşı-rejim güven çarpanı
+  benchmark: BTC/USDT     # rejim trendinin ölçüldüğü sembol (ABD'de SPY)
+  timeframe: 1d           # rejim/breadth zaman dilimi (makro → günlük)
+  trend_period: 200       # uzun-EMA periyodu (fiyat üstünde=boğa)
+  trend_dist_sat_pct: 5.0 # fiyat-EMA mesafesi bu %'de doygunluğa ulaşır (sürekli skor)
+  adx_period: 14
+  adx_min: 20             # ADX bu üstüyse yön teyidi ağırlığı artar
+  use_breadth: true       # alt-coin breadth'i skora harmanla
+  breadth_ma: 50          # breadth için SMA periyodu
+  breadth_top_n: 30       # breadth'te kaç likit sembol taranır
+  breadth_quote: USDT
+  breadth_weight: 0.4     # birleşik skorda breadth ağırlığı (0..1)
+  risk_on_score: 0.34     # skor bu üstüyse RISK_ON
+  risk_off_score: -0.34   # skor bu altıysa RISK_OFF
+  risk_on_ceiling: 1.0    # önerilen azami maruziyet (rapor amaçlı)
+  neutral_ceiling: 0.6
+  risk_off_ceiling: 0.25
+
+# Türev (perpetual) verisi: funding rate + open interest (Binance, ücretsiz).
+# analyze raporunu zenginleştirir; ML'e funding özelliği ekleyebilir.
+# NOT: spot sembol otomatik perpetual'a çevrilir (BTC/USDT → BTC/USDT:USDT).
+data:
+  use_funding: true            # analyze'da funding rate + contrarian duygu göster
+  use_open_interest: true      # analyze'da open interest + eğilim göster
+  use_funding_features: false  # train'de funding_rate ML özelliği ekle (funding geçmişi çeker)
+  funding_elevated: 0.0003     # |funding| bu üstüyse "ağırlıklı" (kesir, 8s)
+  funding_extreme: 0.0007      # |funding| bu üstüyse "aşırı" (contrarian sinyal)
+  oi_history_timeframe: 8h     # OI eğilimi için periyot
+  oi_history_limit: 30         # OI geçmiş barı (Binance ~30 günle sınırlı)
+
+# Pozisyon boyutlama (TÜM stratejilere uygulanır; strateji bloğu override edebilir).
+# Üretilen boyut ÖRNEK/EĞİTSEL'dir — gerçek emir değildir.
+sizing:
+  method: fixed_fractional   # fixed_fractional | atr_target_vol | kelly
+  max_position_pct: 100      # tek pozisyon sermayenin en fazla %'i (portföy kısıtı)
+  target_vol_pct: 1.0        # atr_target_vol: hedeflenen bar oynaklığı %
+  kelly_cap: 0.25            # kelly: oran üst sınırı (tam Kelly çok agresif)
+  kelly_half: true           # kelly: yarım Kelly kullan (önerilen)
+  # kelly girdileri (kelly_win_rate/kelly_payoff) analyze'da geçmişten otomatik
+  # hesaplanır; backtest'te look-ahead olmaması için fixed_fractional'a düşülür.
+
+# Walk-forward optimizasyon (optimize komutu). Parametreyi in-sample seçer,
+# out-of-sample test eder; ızgara dağılımından overfit riskini değerlendirir.
+walkforward:
+  train_bars: 750          # in-sample pencere (bar)
+  test_bars: 250           # out-of-sample pencere (bar)
+  metric: avg_r            # avg_r | total_return_pct | win_rate | sharpe
+  min_trades: 5            # bir combo'nun "geçerli" sayılması için en az işlem
+  grid:                    # denenecek parametre değerleri (kartezyen çarpım)
+    ema_fast: [8, 12, 16]
+    ema_slow: [21, 26, 34]
+    atr_stop_mult: [1.0, 1.5, 2.0]
+
+# Pair trading (pairs komutu): cointegration tabanlı istatistiksel arbitraj.
+pairs:
+  z_entry: 2.0        # |spread z| bu üstüyse pozisyon aç
+  z_exit: 0.5         # |z| bu altıysa çık (spread ortalamaya döndü)
+  coint_pvalue: 0.05  # cointegration anlamlılık eşiği (altı = anlamlı)
+  zscore_window: 0    # z-skoru penceresi (0 = tüm seri)
+
 # Öğrenme / geri besleme döngüsü (evaluate & --calibrate komutları okur)
 learning:
   eval_horizon_bars: 48          # bir sinyal en fazla kaç bar takip edilip çözülür

@@ -7,6 +7,7 @@ NOT: Üretilen seviyeler ÖRNEK/EĞİTSEL'dir; emir değildir.
 from __future__ import annotations
 
 from src.core.models import Action
+from src.strategies.sizing import compute_size
 
 
 def compute_levels(
@@ -14,7 +15,6 @@ def compute_levels(
 ) -> tuple[float, float | None, float | None, float | None]:
     stop_mult = float(params.get("atr_stop_mult", 1.5))
     tp_mult = float(params.get("atr_tp_mult", 3.0))
-    risk_pct = float(params.get("risk_per_trade_pct", 1.0))
     capital = float(params.get("hypothetical_capital_quote", 1000))
 
     entry = price
@@ -25,13 +25,19 @@ def compute_levels(
         stop = entry + stop_mult * atr_val
         take_profit = entry - tp_mult * atr_val
 
-    # Riskten boyutlama: sermayenin risk%'i / birim risk * fiyat.
-    risk_per_unit = abs(entry - stop)
-    size = (capital * risk_pct / 100.0) / risk_per_unit * entry if risk_per_unit > 0 else None
+    # Boyutlama yöntemi config'ten (varsayılan fixed_fractional → mevcut davranış aynı).
+    size = compute_size(
+        params.get("sizing_method", "fixed_fractional"),
+        capital=capital,
+        entry=entry,
+        stop=stop,
+        atr_val=atr_val,
+        params=params,
+    )
 
     return (
         round(entry, 2),
         round(stop, 2),
         round(take_profit, 2),
-        round(size, 2) if size is not None else None,
+        size,
     )

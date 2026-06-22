@@ -26,3 +26,6 @@ __pycache__/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Claude Code yerel ayarları (makineye özel; .claude/skills/ commit edilir)
+.claude/settings.local.json

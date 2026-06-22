@@ -54,9 +54,18 @@ def load_config(config_path: str | Path = "config.yaml") -> AppConfig:
 def strategy_params(yaml_cfg: dict, strategy_name: str | None = None) -> dict:
     """Aktif stratejinin parametrelerini config.yaml'dan çeker.
 
-    timeframe de paramlara eklenir (strateji Signal.timeframe için kullanabilir).
+    timeframe ve global `sizing:` ayarları da paramlara eklenir (strateji bloğu
+    aynı anahtarı tanımlıyorsa o öncelikli). Böylece pozisyon boyutlama tek
+    merkezden ayarlanır ama strateji bazında override edilebilir.
     """
     name = strategy_name or yaml_cfg.get("active_strategy", "ema_rsi")
     params = dict(yaml_cfg.get("strategies", {}).get(name, {}))
     params.setdefault("timeframe", yaml_cfg.get("timeframe", "1h"))
+
+    # Global pozisyon boyutlama ayarları (sizing.method → sizing_method anahtarı).
+    sizing = dict(yaml_cfg.get("sizing", {}) or {})
+    if "method" in sizing:
+        sizing["sizing_method"] = sizing.pop("method")
+    for key, val in sizing.items():
+        params.setdefault(key, val)
     return params

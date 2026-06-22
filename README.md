@@ -1,7 +1,7 @@
 # analizbot — Kripto Analiz & Sinyal Botu
 
-Binance üzerindeki kripto paraları analiz edip **BUY / SELL / HOLD** sinyali ve
-teknik analiz raporu üreten bir Python botu.
+Binance kripto paralarını **ve ABD hisse senetlerini** analiz edip **BUY / SELL / HOLD**
+sinyali, teknik analiz raporu ve **piyasa rejimi** değerlendirmesi üreten bir Python botu.
 
 > **Bu bot GERÇEK EMİR GÖNDERMEZ, bakiyeye/paraya dokunmaz.** Sadece okur,
 > hesaplar ve gerekçeli öneri sunar. Bir **karar-destek aracıdır**, kâhin değildir.
@@ -20,7 +20,25 @@ teknik analiz raporu üreten bir Python botu.
   Williams %R, Supertrend, VWAP, Keltner ve mum formasyonları.**
 - Bildirim: konsol (rich, renkli tablo) + opsiyonel Telegram.
 - Kalıcılık: SQLite (sinyal, sonuç ve tarama geçmişi).
-- **Piyasadan bağımsız çekirdek:** İleride ABD borsası yalnız yeni bir veri adaptörüyle eklenebilir.
+- **Piyasadan bağımsız çekirdek:** Kripto (Binance) **ve ABD hisse** (yfinance) aynı çekirdekle çalışır.
+
+### Yeni özellikler (iki referans repodan esinlenildi)
+
+İlham: [anthropics/financial-services](https://github.com/anthropics/financial-services) +
+[tradermonty/claude-trading-skills](https://github.com/tradermonty/claude-trading-skills).
+
+- **`regime`** — Piyasa rejimi (RISK_ON / NEUTRAL / RISK_OFF): BTC 200-EMA trendi + ADX + alt-coin
+  **breadth**. `analyze`/`screen`/`backtest` komutlarına **`--regime`** ile sinyal kapılama
+  (karşı-rejim sinyali zayıflatılır/elenir) — doğruluğu en çok artıran kaldıraç.
+- **Funding rate + open interest** — `analyze` raporunda perpetual pozisyonlanma/contrarian sinyali;
+  opsiyonel ML özelliği.
+- **`ensemble` stratejisi** — ema_rsi + confluence + ml ağırlıklı oyla birleşir (opsiyonel dinamik ağırlık).
+- **`optimize`** — Walk-forward optimizasyon + parametre sağlamlık/**overfit** analizi (OOS metrikleri).
+- **Gelişmiş pozisyon boyutlama** — fixed_fractional / atr_target_vol / **Kelly** + portföy kısıtı.
+- **`pairs`** — Cointegration tabanlı **pair trading** (istatistiksel arbitraj).
+- **ABD hisse** — `analyze AAPL` gibi semboller otomatik `yfinance`'e yönlenir.
+- **`thesis` + `coach`** — Tez yaşam döngüsü takibi (IDEA→ACTIVE→CLOSED, **MAE/MFE**) + 5-eksen performans koçu.
+- **Claude Skills** — `.claude/skills/` altında **9 skill** ile botu sohbetle kullanma.
 
 ## Seçilen varsayılanlar (neden?)
 
@@ -42,8 +60,10 @@ Python 3.12 gereklidir.
 py -3.12 -m venv .venv
 .\.venv\Scripts\activate
 
-# 2) Bağımlılıklar
+# 2) Bağımlılıklar (çekirdek + Telegram + ML + statsmodels/yfinance dahil)
 pip install -r requirements.txt
+# (Alternatif, editable kurulumda opsiyonel ekstralar:)
+#   pip install -e ".[ml-boost,pairs,equities]"   # lgbm/xgb + pair trading + ABD hisse
 
 # 3) (Opsiyonel) gizli ayarlar
 copy .env.example .env   # sonra .env'i düzenle
@@ -65,6 +85,10 @@ TELEGRAM_CHAT_ID=
 LOG_LEVEL=INFO
 DB_URL=sqlite:///signals.db
 ```
+
+`config.yaml` bölümleri: `strategies` (ema_rsi / confluence / ml / **ensemble**), **`regime`**
+(rejim filtresi), **`data`** (funding/OI), **`sizing`** (pozisyon boyutlama), **`walkforward`**
+(optimize ızgarası), **`pairs`** (cointegration), `learning` (geri besleme), `notify`.
 
 ## Kullanım
 
@@ -96,7 +120,41 @@ python -m src.app.cli performance                    # isabet / R / Brier (strat
 python -m src.app.cli analyze BTC/USDT --calibrate   # güveni geçmiş isabete göre ayarla
 ```
 
-Strateji seçimi: `--strategy ema_rsi|confluence|ml` (veya `config.yaml > active_strategy`).
+### Yeni komutlar
+
+```powershell
+# Piyasa rejimi (RISK_ON / NEUTRAL / RISK_OFF) — BTC trendi + breadth
+python -m src.app.cli regime
+
+# Rejim filtresiyle analiz / tarama / backtest (karşı-rejim sinyalini zayıflat veya ele)
+python -m src.app.cli analyze BTC/USDT -t 4h --regime
+python -m src.app.cli screen -q USDT -m 50 --regime
+python -m src.app.cli backtest BTC/USDT --from 2025-01-01 --to 2026-01-01 -t 4h --regime
+
+# Ensemble stratejisi (ema_rsi + confluence + ml birleşik ağırlıklı oy)
+python -m src.app.cli analyze BTC/USDT -t 4h --strategy ensemble
+
+# Walk-forward optimizasyon + overfit / sağlamlık analizi (OOS metrikleri)
+python -m src.app.cli optimize BTC/USDT --from 2024-01-01 --to 2026-01-01 -t 4h --train 750 --test 250
+
+# Pair trading (cointegration / istatistiksel arbitraj)
+python -m src.app.cli pairs BTC/USDT ETH/USDT -t 4h
+
+# ABD hisse senedi (otomatik yfinance) — kripto ile aynı komutlar
+python -m src.app.cli analyze AAPL -t 1d
+
+# Performans koçu (5-eksen disiplin değerlendirmesi)
+python -m src.app.cli coach
+
+# Tez (fikir) yaşam döngüsü takibi: IDEA → ENTRY_READY → ACTIVE → CLOSED
+python -m src.app.cli thesis create BTC/USDT --dir long --text "200-EMA üstü kırılım" --entry 60000 --stop 58000 --tp 65000
+python -m src.app.cli thesis list
+python -m src.app.cli thesis advance 1 --to ENTRY_READY
+python -m src.app.cli thesis advance 1 --to ACTIVE
+python -m src.app.cli thesis close 1            # gerçekleşen getiri + MAE/MFE postmortem
+```
+
+Strateji seçimi: `--strategy ema_rsi|confluence|ml|ensemble` (veya `config.yaml > active_strategy`).
 
 Her `analyze` çıktısı: sembol/zaman/son fiyat, sinyal + güven %, **madde madde gerekçeler**,
 indikatör tablosu (RSI, EMA, MACD, ATR, 24-bar değişim/hacim), öneri seviyeleri (giriş/stop/hedef + R:R)
@@ -117,6 +175,9 @@ ve "yatırım tavsiyesi değildir" uyarısı.
   sonuçlara temkinli yaklaşın.*
   - `confluence` ayrıca config bayraklarıyla genişletilebilir: `use_supertrend`, `use_mfi`
     (varsayılan kapalı; açılırsa ek onay koşulu olarak eklenir).
+- **`ensemble`** — Yukarıdaki stratejileri **ağırlıklı oyla** birleştirir; en az `min_agreement`
+  üye aynı yöndeyse BUY/SELL üretir, aksi HOLD. `config.yaml > strategies.ensemble` altında üye
+  ağırlıkları ayarlanır; `dynamic_weight: true` ile ağırlıklar geçmiş isabete (hit_rate) göre uyarlanır.
 
 ### EmaRsiStrategy (varsayılan)
 
@@ -153,6 +214,67 @@ python -m src.app.cli analyze BTC/USDT --calibrate
 Ayarlar: `config.yaml > learning` (`eval_horizon_bars`, `min_samples_for_calibration`,
 `calibration_bins`).
 
+## Piyasa rejimi filtresi (doğruluk için en etkili kaldıraç)
+
+`regime` komutu piyasayı **RISK_ON / NEUTRAL / RISK_OFF** olarak sınıflar: benchmark (BTC) 200-EMA
+trendi + ADX + alt-coin **breadth** (sembollerin % kaçı MA üstünde). `analyze`/`screen`/`backtest`
+komutlarına **`--regime`** eklenince karşı-rejim sinyalleri kapılanır:
+
+- **soft** (varsayılan): karşı-rejim sinyalin **güveni düşürülür** (sıralama/kalibrasyon için).
+- **gate**: karşı-rejim sinyali **HOLD'a düşürülür** (backtest'te işlemi eler).
+
+Backtest motoru işlemleri *action*'a göre açtığından, "filtreli vs filtresiz" karşılaştırmasında
+`backtest --regime` **gate** modunu zorlar (soft mod girişleri etkilemez). Ayarlar:
+`config.yaml > regime`. Varsayılan **kapalı** (`enable: false`); açmak için `regime.enable: true`
+ya da komutta `--regime`. Look-ahead yoktur: backtest'te her bar için yalnız o ana dek kapanmış
+günlük rejim kullanılır.
+
+## Türev verisi: funding rate + open interest
+
+`config.yaml > data` ile `analyze` raporu **funding rate** (contrarian duygu: aşırı pozitif =
+kalabalık long = aşırı ısınma) ve **open interest** (eğilim) gösterir. Spot sembol otomatik
+perpetual'a çevrilir (`BTC/USDT` → `BTC/USDT:USDT`). `use_funding_features: true` ise `train`
+komutu funding'i (look-ahead'siz hizalanmış) bir ML özelliği olarak ekler. *(Binance OI geçmişi
+~30 günle sınırlı olduğundan OI canlı bir göstergedir, ML özelliği değildir.)*
+
+## Pozisyon boyutlama
+
+`config.yaml > sizing.method` (tüm stratejilere uygulanır; strateji bloğu override edebilir):
+
+- **fixed_fractional** (varsayılan): işlem başına sabit % risk (stop mesafesine göre boyut).
+- **atr_target_vol**: hedef oynaklığa göre boyut (düşük volatilitede büyür, yüksekte küçülür).
+- **kelly**: geçmiş isabet/ödülden **yarım-Kelly** (yalnız `analyze`'da canlı istatistikten;
+  backtest'te look-ahead olmasın diye fixed_fractional'a düşer).
+
+`max_position_pct` tek pozisyonu sermayenin belirli %'iyle sınırlar. Boyutlar **örnek/eğitseldir**.
+
+## Pair trading (cointegration)
+
+`pairs A B` iki sembolde **cointegration** testi (statsmodels), hedge oranı ve spread **z-skoru**
+hesaplar; spread aşırı açıldığında ucuzu AL / pahalıyı SAT (mean reversion). Yarı-ömür ile dönüş
+hızı raporlanır. Ayarlar: `config.yaml > pairs` (z_entry, z_exit, coint_pvalue). Gerekli ekstra:
+`pip install -e ".[pairs]"` (requirements.txt zaten içerir).
+
+## Tez takibi + performans koçu
+
+- **`thesis`** — bir fikri yaşam döngüsünde izle: **IDEA → ENTRY_READY → ACTIVE → CLOSED**
+  (+ INVALIDATED). Geçiş kuralları doğrulanır. Kapanışta gerçekleşen getiri + **MAE/MFE**
+  (en kötü/en iyi sapma) postmortemi hesaplanır. Alt komutlar: `create / list / show / advance /
+  close / invalidate`.
+- **`coach`** — çözülmüş sinyalleri 5 eksende değerlendirir (beklenti, risk disiplini, tutarlılık,
+  kalibrasyon, örneklem) ve OK / WARN / REVIEW verdikti + öneri verir.
+
+## Claude Skills (sohbetle kullanım)
+
+`.claude/skills/` altında **9 skill** vardır (ayrıntı: `.claude/skills/README.md`). Claude Code/Cowork
+içinde proje kökünde sohbet ederken doğal dille tetiklenir:
+
+- "BTC'yi analiz et" → `crypto-analyze` · "piyasa risk-on mu?" → `regime-check`
+- "hangi coinlerde fırsat var?" → `market-screen` · "backtest yap / overfit var mı?" → `backtest-runner`
+- "son haberler ne etkiliyor?" → `crypto-news-impact` · "ne olabilir?" → `scenario-analyzer`
+- "hangi sektör/anlatı sıcak?" → `theme-detector` · "rapor hazırla" → `narrative-report`
+- "günlük rutini çalıştır" → `daily-workflow` (rejim → tarama → analiz → haber → rapor zinciri)
+
 ## Binance API kurulumu (opsiyonel)
 
 1. Genel piyasa verisi (OHLCV/fiyat) için **anahtar gerekmez** — bot anahtarsız çalışır.
@@ -163,37 +285,50 @@ Ayarlar: `config.yaml > learning` (`eval_horizon_bars`, `min_samples_for_calibra
 ## Mimari (adaptör deseni)
 
 ```
-MarketDataProvider (ABC) ──> CcxtBinanceData        (ileride: YFinanceData / IBKRData)
-        │  ortak DataFrame
+MarketDataProvider (ABC) ──> CcxtBinanceData (kripto)  |  YFinanceData (ABD hisse)
+        │  ortak DataFrame                         (+ funding/OI: src/core/derivatives)
         ▼
-AnalysisEngine  ──>  Strategy (ABC) ──> EmaRsiStrategy / Confluence / Ml
-        │  Signal / AnalysisResult   (opsiyonel ConfidenceCalibrator ile güven kalibrasyonu)
+AnalysisEngine ─> Strategy (ABC) ─> EmaRsi / Confluence / Ml / Ensemble
+        │  Signal / AnalysisResult     (+ RegimeFilteredStrategy sarmalayıcı: rejim kapılama)
+        │                              (opsiyonel ConfidenceCalibrator ile güven kalibrasyonu)
         ├──> Notifier (konsol / Telegram)
-        └──> Storage (SQLite: sinyaller + sonuçlar)
+        └──> Storage (SQLite: sinyaller + sonuçlar + tezler)
                   ▲
-        Öğrenme:  src/learning (evaluator → stats → calibrator)  ←  src/core/simulate (çıkış simülasyonu)
-Tetikleyici: CLI komutu  veya  watch scheduler
+   Öğrenme: src/learning (evaluator → stats → calibrator/coach)  ←  src/core/simulate
+   Rejim:   src/core/regime (trend + breadth)   ·   Pair: src/strategies/pairs (cointegration)
+Tetikleyici: CLI komutu  veya  watch scheduler   ·   Claude Skills: .claude/skills/
 ```
 
 `AnalysisEngine` ve `Strategy` yalnızca **arayüzlere** bağımlıdır; somut Binance sınıfını
 import etmez. Çekirdeğe `if market == "crypto"` mantığı sızmaz.
 
-## ABD borsasını sonradan ekleme
+## ABD hisse senedi desteği (eklendi)
 
-Çekirdeği değiştirmeden:
-1. `src/data/us_equity.py` → `MarketDataProvider`'ı uygula (`yfinance`/IBKR), `market="us_equity"`.
-2. `is_market_open()` içinde NYSE/Nasdaq takvimini uygula (kripto her zaman `True`).
-3. `market_registry.get_provider()` sembol desenine göre doğru sağlayıcıya yönlendirsin.
-4. Strateji aynı kalır (piyasadan bağımsız).
+`src/data/yfinance_data.py` (`YFinanceData`) ile ABD hisseleri/endeksleri desteklenir.
+`market_registry.get_provider()` sembol desenine göre **otomatik** yönlendirir: `BTC/USDT` → Binance;
+`AAPL` / `SPY` / `^VIX` → yfinance. Tüm stratejiler ve komutlar (analyze/backtest/optimize…) değişmeden
+hissede çalışır; `is_market_open()` kaba NYSE saatini uygular.
+
+```powershell
+pip install -e ".[equities]"          # (requirements.txt zaten içerir)
+python -m src.app.cli analyze AAPL -t 1d
+python -m src.app.cli backtest MSFT --from 2023-01-01 --to 2026-01-01 -t 1d
+```
+
+- yfinance interval kısıtı: `1d` / `1h` / `1wk`… desteklenir, **`4h` yoktur**.
+- Hisse için piyasa rejimi: `config.yaml > regime.benchmark: SPY` yapın (varsayılan BTC/USDT).
+- Varsayılan hisse evreni (screen/breadth): `YFinanceData.DEFAULT_UNIVERSE` (~30 büyük-sermaye).
 
 ## Testler
 
 ```powershell
-python -m pytest -q          # birim + uçtan uca testler (ağsız, deterministik)
+python -m pytest -q          # 135 birim + uçtan uca test (ağsız, deterministik)
 python -m ruff check src tests
 ```
 
-Test verisi sentetiktir (`tests/fixtures/ohlcv_btcusdt.csv`); ağ bağımlılığı yoktur.
+Test verisi sentetiktir (`tests/fixtures/ohlcv_btcusdt.csv` + seed'li sentetik seriler);
+ağ bağımlılığı yoktur. Yeni modüllerin (rejim, türev, ensemble, walk-forward, sizing, pairs,
+yfinance, tez, koç) her biri için birim testi vardır.
 
 ## Yasal not / sorumluluk reddi
 

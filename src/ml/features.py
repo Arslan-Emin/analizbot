@@ -73,6 +73,8 @@ FEATURE_COLUMNS = [
     "hour_cos",
     "dow_sin",
     "dow_cos",
+    # --- Türev pozisyonlanma (opsiyonel; df'te yoksa nötr 0.0) ---
+    "funding_rate",
 ]
 
 
@@ -144,6 +146,13 @@ def build_features(df: pd.DataFrame, params: dict) -> pd.DataFrame:
 
     # Nedensel zaman özellikleri (döngüsel sin/cos). DatetimeIndex değilse nötr 0.
     out = _add_time_features(out, df.index)
+
+    # Türev pozisyonlanma (opsiyonel): df'te `funding_rate` varsa kullan (look-ahead'siz
+    # hizalanmış, bkz. derivatives.merge_funding_history), yoksa nötr 0.0. Bu sayede eski
+    # modeller ve funding'siz eğitim sorunsuz çalışır (geriye/ileriye uyum).
+    out["funding_rate"] = (
+        df["funding_rate"].astype(float) if "funding_rate" in df.columns else 0.0
+    )
 
     return out[FEATURE_COLUMNS]
 

@@ -33,3 +33,9 @@ scikit-learn==1.9.0     # RandomForest / HistGradientBoosting + CV, kalibrasyon
 joblib==1.5.3           # eğitilmiş model kaydı/yüklemesi
 lightgbm==4.6.0         # gradient boosting modeli (model_type: lgbm)
 xgboost==3.2.0          # gradient boosting modeli (model_type: xgb)
+
+# --- İstatistiksel arbitraj (pairs komutu) ---
+statsmodels==0.14.6     # cointegration testi (pair trading / mean reversion)
+
+# --- ABD hisse senedi verisi (us_equity sembolleri) ---
+yfinance==1.4.1         # Yahoo Finance OHLCV (AAPL, SPY, ... → YFinanceData)

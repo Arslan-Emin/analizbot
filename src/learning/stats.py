@@ -52,6 +52,30 @@ def performance(
     return out.sort_values("n", ascending=False).reset_index(drop=True)
 
 
+def kelly_inputs(
+    repo: Repository, strategy: str | None = None, symbol: str | None = None
+) -> tuple[float | None, float | None]:
+    """Geçmiş çözülmüş sonuçlardan Kelly girdileri: (win_rate 0..1, payoff=avg_win/avg_loss).
+
+    Hem kazanan hem kaybeden örnek yoksa (None, None) → çağıran fixed_fractional'a düşer.
+    """
+    rows = repo.outcomes(strategy=strategy, symbol=symbol)
+    if not rows:
+        return None, None
+    df = pd.DataFrame(rows)
+    returns = df["realized_return_pct"]
+    wins = returns[returns > 0]
+    losses = returns[returns < 0]
+    if len(df) == 0 or len(wins) == 0 or len(losses) == 0:
+        return None, None
+    avg_loss = abs(float(losses.mean()))
+    if avg_loss <= 0:
+        return None, None
+    win_rate = len(wins) / len(df)
+    payoff = float(wins.mean()) / avg_loss
+    return round(float(win_rate), 4), round(float(payoff), 4)
+
+
 def overall(repo: Repository, strategy: str | None = None) -> dict:
     """Tek satırlık genel özet (toplam sinyal, isabet, ort. getiri, Brier)."""
     rows = repo.outcomes(strategy=strategy)

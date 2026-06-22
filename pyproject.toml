@@ -33,6 +33,10 @@ dependencies = [
 ta = ["pandas-ta-classic>=0.6,<1"]
 # Gradient boosting modelleri (model_type: lgbm | xgb). Olmadan rf/hgb çalışır.
 ml-boost = ["lightgbm>=4,<5", "xgboost>=2,<4"]
+# Pair trading / cointegration (pairs komutu)
+pairs = ["statsmodels>=0.14,<1"]
+# ABD hisse senedi desteği (us_equity sembolleri → YFinanceData)
+equities = ["yfinance>=0.2,<2"]
 # Geliştirme araçları
 dev = ["pytest>=8,<9", "ruff>=0.6", "mypy>=1.8"]
 

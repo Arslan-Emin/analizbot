@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     DateTime,
@@ -85,6 +85,34 @@ class AnalysisRunRow(Base):
     symbols_scanned: Mapped[int] = mapped_column(Integer, default=0)
     signals_generated: Mapped[int] = mapped_column(Integer, default=0)
     errors: Mapped[str] = mapped_column(Text, default="[]")  # JSON listesi
+
+
+class ThesisRow(Base):
+    """Bir yatırım tezinin yaşam döngüsü (IDEA→ENTRY_READY→ACTIVE→CLOSED/INVALIDATED).
+
+    Sinyalden farklı bir KATMAN: kullanıcının takip ettiği fikir + sonucu + MAE/MFE
+    postmortemi. Yeni tablo → create_all otomatik kurar (ALTER gerekmez).
+    """
+
+    __tablename__ = "theses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    strategy: Mapped[str] = mapped_column(String(32), default="manual")
+    direction: Mapped[str] = mapped_column(String(8))  # long / short
+    state: Mapped[str] = mapped_column(String(16), index=True, default="IDEA")
+    thesis: Mapped[str] = mapped_column(Text, default="")  # serbest metin gerekçe
+    entry_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stop_loss: Mapped[float | None] = mapped_column(Float, nullable=True)
+    take_profit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    exit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    realized_return_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    mae_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    mfe_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    signal_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # ilgili sinyal (varsa)
 
 
 class Repository:
@@ -247,3 +275,72 @@ class Repository:
                 stmt = stmt.where(SignalRow.symbol == symbol)
             rows = session.execute(stmt).all()
             return [dict(r._mapping) for r in rows]
+
+    # ----------------------------- Tez (thesis) takibi -----------------------------
+
+    def create_thesis(
+        self,
+        symbol: str,
+        direction: str,
+        thesis: str = "",
+        *,
+        strategy: str = "manual",
+        entry_price: float | None = None,
+        stop_loss: float | None = None,
+        take_profit: float | None = None,
+        signal_id: int | None = None,
+    ) -> int:
+        """Yeni bir tez kaydı oluşturur (state=IDEA), id döndürür."""
+        now = datetime.now(UTC)
+        with Session(self.engine) as session:
+            row = ThesisRow(
+                symbol=symbol,
+                strategy=strategy,
+                direction=direction,
+                state="IDEA",
+                thesis=thesis,
+                entry_price=entry_price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                created_at=now,
+                updated_at=now,
+                signal_id=signal_id,
+            )
+            session.add(row)
+            session.commit()
+            return row.id
+
+    def get_thesis(self, thesis_id: int) -> dict | None:
+        """Tek bir tezi sözlük olarak döndürür (yoksa None)."""
+        with Session(self.engine) as session:
+            row = session.get(ThesisRow, thesis_id)
+            return self._thesis_dict(row) if row else None
+
+    def list_theses(self, state: str | None = None) -> list[dict]:
+        """Tezleri (opsiyonel duruma göre) en yeni önce döndürür."""
+        with Session(self.engine) as session:
+            stmt = select(ThesisRow).order_by(ThesisRow.id.desc())
+            if state:
+                stmt = stmt.where(ThesisRow.state == state)
+            return [self._thesis_dict(r) for r in session.execute(stmt).scalars().all()]
+
+    def update_thesis(self, thesis_id: int, **fields) -> None:
+        """Bir tezin alanlarını günceller; updated_at otomatik tazelenir."""
+        fields["updated_at"] = datetime.now(UTC)
+        with Session(self.engine) as session:
+            session.execute(
+                update(ThesisRow).where(ThesisRow.id == thesis_id).values(**fields)
+            )
+            session.commit()
+
+    @staticmethod
+    def _thesis_dict(row: ThesisRow) -> dict:
+        return {
+            "id": row.id, "symbol": row.symbol, "strategy": row.strategy,
+            "direction": row.direction, "state": row.state, "thesis": row.thesis,
+            "entry_price": row.entry_price, "stop_loss": row.stop_loss,
+            "take_profit": row.take_profit, "created_at": row.created_at,
+            "updated_at": row.updated_at, "closed_at": row.closed_at,
+            "exit_price": row.exit_price, "realized_return_pct": row.realized_return_pct,
+            "mae_pct": row.mae_pct, "mfe_pct": row.mfe_pct, "signal_id": row.signal_id,
+        }
