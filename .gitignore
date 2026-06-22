@@ -6,6 +6,8 @@
 *.sqlite
 *.sqlite3
 results/
+# script çıktıları (backtest CSV'leri, geçici bt_models)
+out/
 *.log
 
 # Eğitilmiş ML modelleri (yeniden üretilebilir; repoya konmaz)

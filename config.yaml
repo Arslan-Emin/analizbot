@@ -12,7 +12,7 @@ watchlist:
 
 timeframe: 1h                 # varsayılan mum periyodu
 scan_interval_minutes: 15     # watch modu kaç dakikada bir tarar
-active_strategy: ema_rsi      # şu an aktif strateji
+active_strategy: ensemble     # backtest karşılaştırmasında en iyi çıkan strateji
 
 # Strateji parametreleri (spec §6). EmaRsiStrategy bunları okur.
 strategies:
@@ -122,7 +122,7 @@ strategies:
 # Sinyalleri makro bağlama göre kapılar: ayı rejiminde BUY, boğa rejiminde SELL
 # zayıflatılır (soft) veya elenir (gate). Varsayılan KAPALI → mevcut davranış aynı.
 regime:
-  enable: false           # true → analyze/screen/backtest'te varsayılan açık
+  enable: true            # backtest'te doğruluğu en çok artıran filtre → varsayılan açık
   mode: soft              # soft (güveni düşür) | gate (HOLD'a düşür)
   penalty: 0.5            # soft modda karşı-rejim güven çarpanı
   benchmark: BTC/USDT     # rejim trendinin ölçüldüğü sembol (ABD'de SPY)
