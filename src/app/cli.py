@@ -13,6 +13,11 @@ import sys
 
 import typer
 
+from src.app.live_strategy import inject_kelly as _inject_kelly
+from src.app.live_strategy import maybe_dynamic_ensemble as _maybe_dynamic_ensemble
+from src.app.live_strategy import regime_cfg as _regime_cfg
+from src.app.live_strategy import resolve_regime_flag as _resolve_regime_flag
+from src.app.live_strategy import wrap_live_regime as _wrap_live_regime
 from src.config import load_config, strategy_params
 from src.core.engine import AnalysisEngine
 from src.data.market_registry import get_provider
@@ -31,7 +36,8 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 app = typer.Typer(
-    help="Kripto Analiz & Sinyal Botu — read-only karar-destek (gerçek emir göndermez).",
+    help="Kripto Analiz & Sinyal Botu — read-only karar-destek; opsiyonel otonom işlem "
+    "(watch --execute / trade; güvenli varsayılan: paper + onaylı).",
     no_args_is_help=True,
     add_completion=False,
 )
@@ -54,62 +60,6 @@ def _build_calibrator(cfg, repo, strategy_name):
         n_bins=int(lcfg.get("calibration_bins", 10)),
         min_samples=int(lcfg.get("min_samples_for_calibration", 30)),
     )
-
-
-def _regime_cfg(cfg) -> dict:
-    """config.yaml `regime:` bölümünü (öneksiz anahtarlar) döndürür."""
-    return dict(cfg.yaml.get("regime", {}))
-
-
-def _resolve_regime_flag(regime_opt: bool | None, rcfg: dict) -> bool:
-    """CLI bayrağı verilmişse onu, yoksa config `regime.enable`'ı kullan."""
-    return regime_opt if regime_opt is not None else bool(rcfg.get("enable", False))
-
-
-def _wrap_live_regime(strategy, provider, rcfg: dict, symbols: list[str] | None = None):
-    """Stratejiyi CANLI rejimle sarar. (sarmalı_strateji, değerlendirme) döndürür."""
-    from src.core.regime import build_live_regime, select_breadth_symbols, static_regime_fn
-    from src.strategies.regime_filtered import RegimeFilteredStrategy
-
-    if symbols is None and bool(rcfg.get("use_breadth", True)):
-        symbols = select_breadth_symbols(
-            provider,
-            str(rcfg.get("breadth_quote", "USDT")),
-            int(rcfg.get("breadth_top_n", 30)),
-        )
-    assessment = build_live_regime(provider, rcfg, symbols)
-    wrapped = RegimeFilteredStrategy(strategy, static_regime_fn(assessment), rcfg)
-    return wrapped, assessment
-
-
-def _maybe_dynamic_ensemble(strategy_name: str, params: dict, db_url: str) -> dict:
-    """Ensemble + dynamic_weight açıksa üye ağırlıklarını geçmiş isabete göre ayarlar."""
-    if strategy_name != "ensemble" or not params.get("dynamic_weight"):
-        return params
-    from src.strategies.ensemble import DEFAULT_MEMBERS, dynamic_weights_from_stats
-
-    members = params.get("members") or DEFAULT_MEMBERS
-    names = [m["name"] for m in members]
-    weights = dynamic_weights_from_stats(Repository(db_url), names)
-    return {**params, "members": [{"name": n, "weight": weights[n]} for n in names]}
-
-
-def _inject_kelly(strategy_name: str, symbol: str, params: dict, db_url: str) -> dict:
-    """Boyutlama 'kelly' ise geçmiş isabet/ödülden Kelly girdilerini enjekte eder.
-
-    Yalnız CANLI analyze'da çağrılır; backtest'te çağrılmaz (geçmiş istatistik
-    backtest'e sızarsa look-ahead olur → kelly orada fixed_fractional'a düşer).
-    """
-    if params.get("sizing_method") != "kelly":
-        return params
-    if params.get("kelly_win_rate") is not None and params.get("kelly_payoff") is not None:
-        return params  # config'te elle verilmiş
-    from src.learning.stats import kelly_inputs
-
-    win, payoff = kelly_inputs(Repository(db_url), strategy_name, symbol)
-    if win is None:
-        return params
-    return {**params, "kelly_win_rate": win, "kelly_payoff": payoff}
 
 
 _REGIME_COLOR = {"RISK_ON": "bold green", "NEUTRAL": "bold yellow", "RISK_OFF": "bold red"}
@@ -205,7 +155,7 @@ def analyze(
     params = _maybe_dynamic_ensemble(strategy_name, params, cfg.settings.db_url)
     params = _inject_kelly(strategy_name, symbol, params, cfg.settings.db_url)
 
-    # API anahtarı .env'den gelir (opsiyonel, read-only). Hardcode YOK.
+    # API anahtarı .env'den gelir (opsiyonel). analyze SADECE okur; emir göndermez. Hardcode YOK.
     provider = get_provider(
         symbol,
         api_key=cfg.settings.binance_api_key,
@@ -877,14 +827,42 @@ def watch(
     calibrate: bool = typer.Option(
         False, "--calibrate/--no-calibrate", help="Güveni geçmiş isabete göre kalibre et."
     ),
+    execute: bool = typer.Option(
+        False, "--execute", help="OTONOM İŞLEM: emir ver (config execution.enabled şart)."
+    ),
+    live: bool = typer.Option(
+        False, "--live", help="CANLI kilit (gerçek para; +LIVE_TRADING=1 +mode: live)."
+    ),
 ) -> None:
-    """Watch modu: watchlist'i periyodik tarar, sinyal değişiminde bildirir."""
+    """Watch modu: watchlist'i periyodik tarar, sinyal değişiminde bildirir.
+
+    --execute olmadan READ-ONLY'dir (sadece sinyal/bildirim). --execute ile config
+    `execution:` ayarlarına göre paper/testnet/live emir verir; canlı için ÜÇLÜ KİLİT
+    (LIVE_TRADING=1 + execution.mode: live + --live) gerekir.
+    """
     from src.app.scheduler import run_watch
 
     cfg = load_config()
     setup_logging(cfg.settings.log_level)
     notifier = build_notifier(cfg)
-    run_watch(cfg, notifier, once=once, calibrate=calibrate)
+    run_watch(cfg, notifier, once=once, calibrate=calibrate, execute=execute, live=live)
+
+
+@app.command()
+def telegram(
+    live: bool = typer.Option(False, "--live", help="Canlı kilit (gerçek para)."),
+) -> None:
+    """Telegram kontrol botu: uzaktan /status /approve /close /panic + otomatik tarama/işlem.
+
+    Tek süreçte hem periyodik tarar+emir verir (watch --execute gibi) hem de telefondan
+    komut kabul eder. .env'de TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID şart; yalnız o chat
+    yetkilidir. Canlı için ayrıca üçlü kilit (LIVE_TRADING=1 + mode: live + --live).
+    """
+    from src.app.telegram_bot import run_telegram_bot
+
+    cfg = load_config()
+    setup_logging(cfg.settings.log_level)
+    run_telegram_bot(cfg, live=live)
 
 
 # --------------------------------------------------------------------------- #
@@ -1126,6 +1104,276 @@ def thesis_close(
     )
     typer.echo(f"Tez #{thesis_id} CLOSED.")
     _render_thesis(repo.get_thesis(thesis_id))
+
+
+# --------------------------------------------------------------------------- #
+# Otonom işlem (execution) — trade sub-app
+# --------------------------------------------------------------------------- #
+
+trade_app = typer.Typer(
+    help="Otonom işlem: durum, pozisyon, onay (approve/reject), kapatma, panic. "
+    "Kademe config execution.mode (paper/testnet/live); canlı için üçlü kilit.",
+    no_args_is_help=True,
+)
+app.add_typer(trade_app, name="trade")
+
+
+def _exec_mode(cfg) -> str:
+    """Aktif execution kademesi (paper/testnet/live)."""
+    return str(cfg.yaml.get("execution", {}).get("mode", "paper")).lower()
+
+
+def _build_trade_manager(cfg, *, live: bool = False):
+    """trade approve/close/panic için executor + ExecutionManager kurar.
+
+    Factory üçlü kilidi uygular → canlı modda kilit eksikse LiveLockError yükselir
+    (çağıran yakalar). `enabled` BURADA zorunlu değildir: kapatma/panic manuel
+    güvenlik komutlarıdır, otonom şalter kapalıyken de çalışmalı.
+    """
+    from src.execution.factory import build_executor
+    from src.execution.manager import ExecutionManager
+    from src.execution.models import DecisionMode
+
+    repo = Repository(cfg.settings.db_url)
+    provider = get_provider(
+        "BTC/USDT",
+        api_key=cfg.settings.binance_api_key,
+        api_secret=cfg.settings.binance_api_secret,
+    )
+    executor = build_executor(cfg, provider, repo, live_flag=live)
+    ecfg = dict(cfg.yaml.get("execution", {}))
+    decision = DecisionMode(str(ecfg.get("decision", "confirm")).lower())
+    mgr = ExecutionManager(
+        repo, executor, build_notifier(cfg), ecfg,
+        decision=decision, strategy=cfg.yaml.get("active_strategy", "ema_rsi"),
+    )
+    return repo, mgr
+
+
+@trade_app.command("status")
+def trade_status() -> None:
+    """Otonom işlem özeti: kademe, açık pozisyon, maruziyet, günlük PnL, kill-switch."""
+    from datetime import UTC, datetime
+
+    from rich.console import Console
+    from rich.table import Table
+
+    from src.notify.format import DISCLAIMER
+
+    cfg = load_config()
+    setup_logging(cfg.settings.log_level)
+    repo = Repository(cfg.settings.db_url)
+    ecfg = dict(cfg.yaml.get("execution", {}))
+    mode = _exec_mode(cfg)
+
+    open_pos = repo.list_positions("open", mode)
+    exposure = repo.open_exposure(mode)
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
+    daily = repo.get_daily_pnl(today, mode)
+    pending = repo.list_pending_intents("PENDING", mode)
+
+    console = Console()
+    enabled = bool(ecfg.get("enabled", False))
+    mode_color = {"paper": "cyan", "testnet": "yellow", "live": "bold red"}.get(mode, "white")
+    table = Table(title="Otonom İşlem Durumu", header_style="bold magenta")
+    table.add_column("Alan")
+    table.add_column("Değer", justify="right")
+    table.add_row("Kademe (mode)", f"[{mode_color}]{mode}[/]")
+    table.add_row("Otonom şalter (enabled)", "[green]açık[/]" if enabled else "[dim]kapalı[/]")
+    table.add_row("Karar modu", str(ecfg.get("decision", "confirm")))
+    table.add_row(
+        "Açık pozisyon",
+        f"{len(open_pos)} / {ecfg.get('max_concurrent_positions', 2)}",
+    )
+    table.add_row("Toplam maruziyet", f"{exposure:.2f} {cfg.yaml.get('quote_currency', 'USDT')}")
+    table.add_row("Bekleyen onay", str(len(pending)))
+
+    cap = float(ecfg.get("allocation_quote_cap", 0) or 0)
+    max_loss_pct = float(ecfg.get("max_daily_loss_pct", 3.0))
+    if cap > 0:
+        threshold = cap * max_loss_pct / 100.0
+        ks = "🔴 TETİKLENDİ" if daily <= -threshold else "yeşil"
+        table.add_row("Günlük PnL", f"{daily:+.2f} (kill-switch -{threshold:.2f} → {ks})")
+    else:
+        table.add_row("Günlük PnL", f"{daily:+.2f} (kill-switch %{max_loss_pct} serbest bakiyeye)")
+    console.print(table)
+    if open_pos:
+        console.print("[dim]Ayrıntı için: trade positions[/]")
+    console.print(f"[dim italic]{DISCLAIMER}[/]")
+
+
+@trade_app.command("positions")
+def trade_positions(
+    show_all: bool = typer.Option(False, "--all", help="Kapanmış pozisyonları da göster."),
+) -> None:
+    """Açık (veya --all ile tüm) pozisyonları tablo olarak listeler."""
+    from rich.console import Console
+    from rich.table import Table
+
+    cfg = load_config()
+    setup_logging(cfg.settings.log_level)
+    repo = Repository(cfg.settings.db_url)
+    mode = _exec_mode(cfg)
+    rows = repo.list_positions(None if show_all else "open", mode)
+
+    console = Console()
+    if not rows:
+        console.print("[yellow]Pozisyon yok.[/] (kademe: " + mode + ")")
+        return
+
+    # Açık pozisyonlar için anlık fiyat (read-only sağlayıcı, tembel kurulur).
+    _provider = {}
+
+    def _price(symbol: str) -> float | None:
+        try:
+            if "p" not in _provider:
+                _provider["p"] = get_provider(
+                    symbol, api_key=cfg.settings.binance_api_key,
+                    api_secret=cfg.settings.binance_api_secret,
+                )
+            return float(_provider["p"].get_ticker(symbol))
+        except Exception:
+            return None
+
+    table = Table(title=f"Pozisyonlar ({mode})", header_style="bold magenta")
+    for col in ("id", "sembol", "durum", "giriş", "anlık", "adet", "stop", "hedef", "PnL%", "PnL"):
+        table.add_column(col, justify="left" if col in ("sembol", "durum") else "right")
+    for p in rows:
+        entry = p["entry_price"]
+        # Açıkta anlık fiyat; kapalıda çıkış fiyatı.
+        price = _price(p["symbol"]) if p["status"] == "open" else p["exit_price"]
+        if price and entry:
+            pnl_pct = (price / entry - 1.0) * 100.0
+            pnl_q = (price - entry) * p["qty"] if p["status"] == "open" else p["pnl_quote"]
+            color = "green" if pnl_pct >= 0 else "red"
+            pnl_pct_cell = f"[{color}]{pnl_pct:+.2f}[/]"
+            pnl_cell = "" if pnl_q is None else f"{pnl_q:+.2f}"
+        else:
+            pnl_pct_cell = ""
+            pnl_cell = "" if p["pnl_quote"] is None else f"{p['pnl_quote']:+.2f}"
+        status_color = "green" if p["status"] == "open" else "dim"
+        table.add_row(
+            str(p["id"]), p["symbol"], f"[{status_color}]{p['status']}[/]",
+            str(round(entry, 4)), "" if price is None else str(round(price, 4)),
+            str(round(p["qty"], 8)), str(p["stop_price"]), str(p["tp_price"]),
+            pnl_pct_cell, pnl_cell,
+        )
+    console.print(table)
+
+
+@trade_app.command("pending")
+def trade_pending() -> None:
+    """Onay bekleyen emir niyetlerini listeler (confirm modu)."""
+    from rich.console import Console
+    from rich.table import Table
+
+    cfg = load_config()
+    setup_logging(cfg.settings.log_level)
+    repo = Repository(cfg.settings.db_url)
+    mode = _exec_mode(cfg)
+    rows = repo.list_pending_intents("PENDING", mode)
+
+    console = Console()
+    if not rows:
+        console.print("[yellow]Bekleyen onay yok.[/]")
+        return
+    table = Table(title="Bekleyen Emir Niyetleri", header_style="bold magenta")
+    for col in ("id", "sembol", "yön", "tutar", "stop", "hedef", "güven"):
+        table.add_column(col, justify="left" if col in ("sembol", "yön") else "right")
+    for it in rows:
+        conf = "" if it["confidence"] is None else f"%{it['confidence'] * 100:.0f}"
+        table.add_row(
+            str(it["id"]), it["symbol"], it["side"], f"{it['quote_amount']:.2f}",
+            str(it["stop_price"]), str(it["take_profit"]), conf,
+        )
+    console.print(table)
+    console.print("[dim]Onayla: trade approve <id>  ·  Reddet: trade reject <id>[/]")
+
+
+@trade_app.command("approve")
+def trade_approve(
+    intent_id: int = typer.Argument(..., help="Onaylanacak niyet id'si (trade pending)"),
+    live: bool = typer.Option(False, "--live", help="Canlı kilit (gerçek para)."),
+) -> None:
+    """Bekleyen bir emir niyetini onaylar ve emri hayata geçirir."""
+    from src.execution.factory import LiveLockError
+
+    cfg = load_config()
+    setup_logging(cfg.settings.log_level)
+    try:
+        _, mgr = _build_trade_manager(cfg, live=live)
+    except LiveLockError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=1) from None
+    ok, msg = mgr.approve_intent(intent_id)
+    typer.echo(msg)
+    if not ok:
+        raise typer.Exit(code=1)
+
+
+@trade_app.command("reject")
+def trade_reject(
+    intent_id: int = typer.Argument(..., help="Reddedilecek niyet id'si"),
+) -> None:
+    """Bekleyen bir emir niyetini reddeder (emir verilmez; kilit gerekmez)."""
+    from datetime import UTC, datetime
+
+    cfg = load_config()
+    setup_logging(cfg.settings.log_level)
+    repo = Repository(cfg.settings.db_url)
+    intent = repo.get_pending_intent(intent_id)
+    if intent is None:
+        typer.echo(f"Niyet #{intent_id} bulunamadı.")
+        raise typer.Exit(code=1)
+    if intent["status"] != "PENDING":
+        typer.echo(f"Niyet #{intent_id} zaten {intent['status']}.")
+        raise typer.Exit(code=1)
+    repo.update_pending_intent(intent_id, status="REJECTED", resolved_at=datetime.now(UTC))
+    typer.echo(f"Niyet #{intent_id} reddedildi.")
+
+
+@trade_app.command("close")
+def trade_close(
+    symbol: str = typer.Argument(..., help="Kapatılacak sembol, örn: BTC/USDT"),
+    live: bool = typer.Option(False, "--live", help="Canlı kilit (gerçek para)."),
+) -> None:
+    """Bir sembolün açık pozisyonunu market satışla kapatır."""
+    from src.execution.factory import LiveLockError
+
+    cfg = load_config()
+    setup_logging(cfg.settings.log_level)
+    try:
+        _, mgr = _build_trade_manager(cfg, live=live)
+    except LiveLockError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=1) from None
+    ok, msg = mgr.close_symbol(symbol)
+    typer.echo(msg)
+    if not ok:
+        raise typer.Exit(code=1)
+
+
+@trade_app.command("panic")
+def trade_panic(
+    live: bool = typer.Option(False, "--live", help="Canlı kilit (gerçek para)."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Onay sormadan uygula."),
+) -> None:
+    """ACİL DURDURMA: tüm açık pozisyonları kapat + bekleyen niyetleri reddet."""
+    from src.execution.factory import LiveLockError
+
+    cfg = load_config()
+    setup_logging(cfg.settings.log_level)
+    if not yes:
+        typer.confirm(
+            f"[{_exec_mode(cfg)}] TÜM açık pozisyonlar piyasadan kapatılacak. Emin misiniz?",
+            abort=True,
+        )
+    try:
+        _, mgr = _build_trade_manager(cfg, live=live)
+    except LiveLockError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=1) from None
+    typer.echo(mgr.panic())
 
 
 if __name__ == "__main__":

@@ -1,7 +1,8 @@
 """Binance somut veri sağlayıcısı (ccxt ile).
 
-Yalnızca OKUR: OHLCV + ticker çeker. API anahtarı opsiyoneldir; verilirse
-SADECE read-only kullanılır (gerçek emir gönderme kodu YOKTUR). Ağ/borsa
+Yalnızca OKUR: OHLCV + ticker çeker. API anahtarı opsiyoneldir; verilirse SADECE
+veri/okuma için kullanılır — BU SINIFTA emir gönderme kodu YOKTUR. (Otonom işlem
+emirleri ayrı bir ccxt istemcisinde: src/execution/binance_spot.py.) Ağ/borsa
 hataları tenacity ile exponential-backoff yapılarak yeniden denenir.
 """
 

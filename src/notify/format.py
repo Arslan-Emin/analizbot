@@ -5,8 +5,8 @@ from __future__ import annotations
 from src.core.models import AnalysisResult
 
 DISCLAIMER = (
-    "UYARI: Yatırım tavsiyesi değildir. "
-    "Sinyaller geçmiş veriye ve sabit kurallara dayanır."
+    "UYARI: Yatırım tavsiyesi değildir. Sinyaller geçmiş veriye ve sabit kurallara dayanır. "
+    "Otonom işlem yalnız açıkça etkinleştirilirse devreye girer ve GERÇEK PARA riski taşır."
 )
 
 

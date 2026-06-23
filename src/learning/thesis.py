@@ -1,8 +1,9 @@
 """Tez (thesis) yaşam döngüsü + MAE/MFE postmortem — saf mantık.
 
-NEDEN? Bot read-only olduğu için gerçek pozisyon tutmaz; ama kullanıcı bir fikri
-(tez) fikir aşamasından kapanışa kadar TAKİP edip disiplinini ölçebilir. Bu, sinyal
-üretmekten farklı bir katman: "neye, neden inandım; sonuç ne oldu; ne öğrendim".
+NEDEN? Tez katmanı, otonom emir yürütmeden BAĞIMSIZDIR: kullanıcı bir fikri (tez)
+fikir aşamasından kapanışa kadar elle TAKİP edip disiplinini ölçer. Bu, sinyal
+üretmekten de emir yürütmekten de farklı bir katman: "neye, neden inandım; sonuç
+ne oldu; ne öğrendim". (Gerçek otonom pozisyonlar ayrıdır: src/execution + exec_positions.)
 
 İlham: tradermonty/claude-trading-skills — trader-memory-core (state machine).
 

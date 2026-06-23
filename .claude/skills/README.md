@@ -39,5 +39,6 @@ Botu doğrudan da çalıştırabilirsiniz:
 .venv\Scripts\python.exe -m src.app.cli <komut> ...
 ```
 
-**Uyarı:** Tüm çıktılar read-only karar-destek sinyalidir; yatırım tavsiyesi değildir.
-Bot gerçek emir göndermez.
+**Uyarı:** Bu skill'ler **read-only** analizdir (yatırım tavsiyesi değildir). Otonom işlem
+ayrı ve opsiyoneldir; yalnız `watch --execute` / `trade` ile, açıkça etkinleştirilince devreye
+girer (varsayılan: paper/simülasyon, canlı için üçlü kilit).

@@ -24,12 +24,17 @@ class Settings(BaseSettings):
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
 
-    binance_api_key: str | None = None       # opsiyonel; verilirse SADECE read-only
+    binance_api_key: str | None = None       # canlı işlem/veri; verilmezse genel veri yine çalışır
     binance_api_secret: str | None = None
+    binance_testnet_api_key: str | None = None    # Binance Spot TESTNET anahtarı (sahte para)
+    binance_testnet_api_secret: str | None = None
     telegram_bot_token: str | None = None     # opsiyonel
     telegram_chat_id: str | None = None
     log_level: str = "INFO"
     db_url: str = "sqlite:///signals.db"
+    # CANLI işlem ana kilidi (.env LIVE_TRADING=1). Üçlü kilidin parçası; bkz.
+    # src.execution.factory.build_executor. Varsayılan False → gerçek emir gönderilmez.
+    live_trading: bool = False
 
 
 @dataclass

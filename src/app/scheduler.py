@@ -4,6 +4,10 @@
 - Spam önleme: aynı sinyal tekrar gönderilmez; yalnız BUY↔SELL↔HOLD geçişlerinde
   bildirim atılır (DB'deki son aksiyonla karşılaştırılır).
 - Sembol-bazlı hata izolasyonu: bir sembol hata verirse loglanır, diğerleri devam eder.
+- Rejim filtresi + dinamik ensemble + Kelly: analyze/screen ile AYNI canlı yol
+  (src.app.live_strategy) → otonom işlemler de rejim-filtrelidir.
+- Opsiyonel OTONOM İŞLEM: `exec_manager` verilirse her taramada açık pozisyonlar
+  mutabakatlanır (stop/TP) ve her sinyal pozisyonla bağdaştırılıp emir verilir/bekletilir.
 """
 
 from __future__ import annotations
@@ -13,6 +17,12 @@ from datetime import UTC, datetime
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
+from src.app.live_strategy import (
+    inject_kelly,
+    maybe_dynamic_ensemble,
+    regime_cfg,
+    resolve_regime_flag,
+)
 from src.config import AppConfig, strategy_params
 from src.core.engine import AnalysisEngine
 from src.data.market_registry import get_provider
@@ -31,15 +41,29 @@ class WatchScanner:
         repo: Repository,
         *,
         calibrate: bool = False,
+        exec_manager=None,
     ) -> None:
         self.cfg = cfg
         self.notifier = notifier
         self.repo = repo
         self.timeframe = cfg.yaml.get("timeframe", "1h")
+        # Otonom modda işlem zaman dilimi (config execution.timeframe) global timeframe'i ezer
+        # (read-only watch global tf'i kullanır; --execute ile işlem tf'i devreye girer).
+        if exec_manager is not None:
+            etf = cfg.yaml.get("execution", {}).get("timeframe")
+            if etf:
+                self.timeframe = str(etf)
         self.watchlist = list(cfg.yaml.get("watchlist", []))
         self.strategy_name = cfg.yaml.get("active_strategy", "ema_rsi")
         self.params = strategy_params(cfg.yaml, self.strategy_name)
+        # Dinamik ensemble ağırlıkları (ensemble + dynamic_weight ise) bir kez ayarlanır.
+        self.params = maybe_dynamic_ensemble(self.strategy_name, self.params, cfg.settings.db_url)
         self.calibrator = self._build_calibrator() if calibrate else None
+        # Opsiyonel otonom işlem yöneticisi (None → read-only, mevcut davranış).
+        self.exec_manager = exec_manager
+        # Piyasa rejimi filtresi (config.regime.enable). analyze/screen ile aynı.
+        self.regime_cfg = regime_cfg(cfg)
+        self.regime_enabled = resolve_regime_flag(None, self.regime_cfg)
 
     def _build_calibrator(self):
         """Geçmiş sinyallerden güven kalibratörü kurar (config.learning ayarlarıyla)."""
@@ -53,10 +77,46 @@ class WatchScanner:
             min_samples=int(lcfg.get("min_samples_for_calibration", 30)),
         )
 
+    def _build_regime(self):
+        """Tarama başına TEK rejim değerlendirmesi (tüm sembollere uygulanır)."""
+        from src.core.regime import build_live_regime, select_breadth_symbols
+
+        provider = get_provider(
+            "BTC/USDT",
+            api_key=self.cfg.settings.binance_api_key,
+            api_secret=self.cfg.settings.binance_api_secret,
+        )
+        symbols = None
+        if bool(self.regime_cfg.get("use_breadth", True)):
+            symbols = select_breadth_symbols(
+                provider,
+                str(self.regime_cfg.get("breadth_quote", "USDT")),
+                int(self.regime_cfg.get("breadth_top_n", 30)),
+            )
+        return build_live_regime(provider, self.regime_cfg, symbols)
+
     def scan_once(self) -> None:
         started = datetime.now(UTC)
         errors: list[str] = []
         generated = 0
+
+        # Rejim değerlendirmesi (bir kez). Hata olursa kapılama yapmadan devam.
+        assessment = None
+        if self.regime_enabled:
+            try:
+                assessment = self._build_regime()
+                log.info(
+                    "Watch rejim: %s (skor %+.2f)", assessment.state.value, assessment.score
+                )
+            except Exception as exc:
+                log.warning("Rejim değerlendirmesi alınamadı, filtresiz devam: %s", exc)
+
+        # Otonom mod: tarama başında açık pozisyonların stop/TP mutabakatı.
+        if self.exec_manager is not None:
+            try:
+                self.exec_manager.reconcile()
+            except Exception as exc:
+                log.error("Mutabakat (reconcile) hatası: %s", exc)
 
         for symbol in self.watchlist:
             try:
@@ -68,7 +128,17 @@ class WatchScanner:
                     api_key=self.cfg.settings.binance_api_key,
                     api_secret=self.cfg.settings.binance_api_secret,
                 )
-                strategy = build_strategy(self.strategy_name, self.params)
+                params = inject_kelly(
+                    self.strategy_name, symbol, self.params, self.cfg.settings.db_url
+                )
+                strategy = build_strategy(self.strategy_name, params)
+                if assessment is not None:
+                    from src.core.regime import static_regime_fn
+                    from src.strategies.regime_filtered import RegimeFilteredStrategy
+
+                    strategy = RegimeFilteredStrategy(
+                        strategy, static_regime_fn(assessment), self.regime_cfg
+                    )
                 engine = AnalysisEngine(provider, strategy, calibrator=self.calibrator)
                 result = engine.analyze(symbol, timeframe=self.timeframe)
 
@@ -82,6 +152,10 @@ class WatchScanner:
                     log.info("%s sinyal: %s -> %s (bildirildi)", symbol, prev_action, new_action)
                 else:
                     log.info("%s sinyal değişmedi (%s), bildirim yok", symbol, new_action.value)
+
+                # Otonom işlem: sinyali pozisyonla bağdaştır (değişse de değişmese de).
+                if self.exec_manager is not None:
+                    self.exec_manager.on_signal(result)
 
             except Exception as exc:  # sembol-bazlı izolasyon
                 log.error("%s taranırken hata: %s", symbol, exc)
@@ -97,11 +171,60 @@ class WatchScanner:
         )
 
 
+def _build_exec_manager(cfg: AppConfig, notifier: Notifier, repo: Repository, *, live: bool):
+    """watch --execute için executor + ExecutionManager kurar (kapılı + güvenli).
+
+    None döner: execution.enabled=false veya canlı kilit eksikse (LiveLockError) →
+    watch read-only sürer.
+    """
+    from src.execution.factory import LiveLockError, build_executor
+    from src.execution.manager import ExecutionManager
+    from src.execution.models import DecisionMode
+
+    ecfg = dict(cfg.yaml.get("execution", {}))
+    if not ecfg.get("enabled", False):
+        log.warning(
+            "Otonom işlem istendi ama config execution.enabled=false → READ-ONLY devam."
+        )
+        return None
+    try:
+        provider = get_provider(
+            "BTC/USDT",
+            api_key=cfg.settings.binance_api_key,
+            api_secret=cfg.settings.binance_api_secret,
+        )
+        executor = build_executor(cfg, provider, repo, live_flag=live)
+        decision = DecisionMode(str(ecfg.get("decision", "confirm")).lower())
+        manager = ExecutionManager(
+            repo, executor, notifier, ecfg,
+            decision=decision, strategy=cfg.yaml.get("active_strategy", "ema_rsi"),
+        )
+        log.warning(
+            "⚠️ OTONOM İŞLEM ETKİN: mod=%s, karar=%s. (paper=simülasyon)",
+            executor.mode.value, decision.value,
+        )
+        notifier.send_text(
+            f"⚙️ Otonom işlem etkin: mod={executor.mode.value}, karar={decision.value}."
+        )
+        return manager
+    except LiveLockError as exc:
+        log.error("%s", exc)
+        log.warning("Otonom işlem devre dışı → READ-ONLY devam.")
+        return None
+
+
 def run_watch(
-    cfg: AppConfig, notifier: Notifier, *, once: bool = False, calibrate: bool = False
+    cfg: AppConfig,
+    notifier: Notifier,
+    *,
+    once: bool = False,
+    calibrate: bool = False,
+    execute: bool = False,
+    live: bool = False,
 ) -> None:
     repo = Repository(cfg.settings.db_url)
-    scanner = WatchScanner(cfg, notifier, repo, calibrate=calibrate)
+    exec_manager = _build_exec_manager(cfg, notifier, repo, live=live) if execute else None
+    scanner = WatchScanner(cfg, notifier, repo, calibrate=calibrate, exec_manager=exec_manager)
 
     if not scanner.watchlist:
         log.warning("watchlist boş; config.yaml'a sembol ekleyin.")

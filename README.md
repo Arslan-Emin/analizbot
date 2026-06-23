@@ -3,8 +3,11 @@
 Binance kripto paralarını **ve ABD hisse senetlerini** analiz edip **BUY / SELL / HOLD**
 sinyali, teknik analiz raporu ve **piyasa rejimi** değerlendirmesi üreten bir Python botu.
 
-> **Bu bot GERÇEK EMİR GÖNDERMEZ, bakiyeye/paraya dokunmaz.** Sadece okur,
-> hesaplar ve gerekçeli öneri sunar. Bir **karar-destek aracıdır**, kâhin değildir.
+> **Varsayılan olarak READ-ONLY'dir:** sadece okur, hesaplar ve gerekçeli öneri sunar —
+> bir **karar-destek aracıdır**, kâhin değildir. **Opsiyonel olarak**, açıkça
+> etkinleştirilirse Binance Spot'ta **otonom işlem** yapabilir (varsayılan kademe
+> **paper/simülasyon**; canlı gerçek-para için **üçlü güvenlik kilidi** şarttır —
+> bkz. aşağıdaki **"Otonom İşlem"** bölümü).
 
 ## Özellikler
 
@@ -38,6 +41,9 @@ sinyali, teknik analiz raporu ve **piyasa rejimi** değerlendirmesi üreten bir 
 - **`pairs`** — Cointegration tabanlı **pair trading** (istatistiksel arbitraj).
 - **ABD hisse** — `analyze AAPL` gibi semboller otomatik `yfinance`'e yönlenir.
 - **`thesis` + `coach`** — Tez yaşam döngüsü takibi (IDEA→ACTIVE→CLOSED, **MAE/MFE**) + 5-eksen performans koçu.
+- **Otonom işlem (Binance Spot)** — `watch --execute` ile sinyale göre **paper/testnet/live** emir verir:
+  **RiskManager** (stop-loss %5, günlük zarar kill-switch, pozisyon/maruziyet/cooldown limitleri),
+  borsada koruyucu **STOP_LOSS_LIMIT**, onaylı/otonom mod ve `trade` paneli. Canlı için **üçlü kilit**.
 - **Claude Skills** — `.claude/skills/` altında **9 skill** ile botu sohbetle kullanma.
 
 ## Seçilen varsayılanlar (neden?)
@@ -76,11 +82,14 @@ copy .env.example .env   # sonra .env'i düzenle
 - **`.env`** — *gizli* ayarlar (API anahtarları, Telegram token). Git'e **girmez**. Şablon: `.env.example`.
 - **`config.yaml`** — *gizli olmayan* ayarlar: strateji parametreleri, izleme listesi, tarama aralığı.
 
-`.env` (hepsi opsiyonel):
+`.env` (hepsi opsiyonel; otonom işlem yapmıyorsan anahtar gerekmez):
 ```
-BINANCE_API_KEY=        # genel veri için GEREKMEZ; verilirse SADECE read-only
+BINANCE_API_KEY=             # veri için GEREKMEZ; CANLI işlemde "Spot Trading" açık olmalı
 BINANCE_API_SECRET=
-TELEGRAM_BOT_TOKEN=     # Telegram bildirimi için
+BINANCE_TESTNET_API_KEY=     # execution.mode: testnet için (sahte para)
+BINANCE_TESTNET_API_SECRET=
+LIVE_TRADING=0               # CANLI işlem ana kilidi (üçlünün 1.'si); 0 = kapalı
+TELEGRAM_BOT_TOKEN=          # Telegram bildirimi için
 TELEGRAM_CHAT_ID=
 LOG_LEVEL=INFO
 DB_URL=sqlite:///signals.db
@@ -88,7 +97,8 @@ DB_URL=sqlite:///signals.db
 
 `config.yaml` bölümleri: `strategies` (ema_rsi / confluence / ml / **ensemble**), **`regime`**
 (rejim filtresi), **`data`** (funding/OI), **`sizing`** (pozisyon boyutlama), **`walkforward`**
-(optimize ızgarası), **`pairs`** (cointegration), `learning` (geri besleme), `notify`.
+(optimize ızgarası), **`pairs`** (cointegration), `learning` (geri besleme), `notify`,
+**`execution`** (otonom işlem — varsayılan kapalı/paper).
 
 ## Kullanım
 
@@ -275,12 +285,63 @@ içinde proje kökünde sohbet ederken doğal dille tetiklenir:
 - "hangi sektör/anlatı sıcak?" → `theme-detector` · "rapor hazırla" → `narrative-report`
 - "günlük rutini çalıştır" → `daily-workflow` (rejim → tarama → analiz → haber → rapor zinciri)
 
+## Otonom İşlem (Binance Spot) — güvenlik öncelikli
+
+Bot, açıkça etkinleştirilirse ürettiği **ensemble + rejim** sinyaline göre Binance Spot'ta
+(long-only) otomatik **alım/satım** yapabilir. **Varsayılan davranış değişmez:** `execution.enabled:
+false` ve `--execute` yokken bot tamamen read-only kalır.
+
+**Üç kademe (`config.yaml > execution.mode`):**
+- **`paper`** (VARSAYILAN) — simülasyon; API yok, gerçek para yok. Canlı fiyatla dolum simüle edilir.
+- **`testnet`** — Binance testnet (sahte para). `.env`'de `BINANCE_TESTNET_API_KEY/SECRET` gerekir.
+- **`live`** — GERÇEK PARA. Yalnız **üçlü kilit** ile.
+
+**Canlı için ÜÇLÜ KİLİT (üçü birden):**
+1. `.env` → `LIVE_TRADING=1`
+2. `config.yaml` → `execution.mode: live`
+3. CLI → `--live`
+
+Biri eksikse canlı emir **reddedilir** (bot read-only sürer). Ayrıca emir vermek için
+`execution.enabled: true` **ve** `watch --execute` şarttır.
+
+**Güvenlik ağları:**
+- **RiskManager** her girişten önce: stop-loss **%5**, **kill-switch** (günlük zarar
+  `max_daily_loss_pct`'i aşarsa yeni giriş yok), `max_concurrent_positions`,
+  `max_position_pct`, `max_total_exposure_pct`, `cooldown_minutes`, `min_order_usdt`,
+  `allocation_quote_cap` (botun kullanacağı azami USDT).
+- Girişten sonra borsaya **koruyucu STOP_LOSS_LIMIT** satış konur → bot kapalıyken bile %5 stop korur.
+- Her taramada **mutabakat**: borsadaki bakiye/emirle yerel durum eşitlenir; pozisyon
+  varsa tekrar açılmaz (piramitleme yok).
+- **Karar modu:** `confirm` (varsayılan; emir önce onay bekler) veya `auto` (otonom).
+
+```powershell
+# Paper (simülasyon) otonom tarama — önce config'te execution.enabled: true yapın
+python -m src.app.cli watch --execute --once
+
+# trade paneli (kademe config.execution.mode'a göre)
+python -m src.app.cli trade status            # kademe, açık pozisyon, maruziyet, günlük PnL
+python -m src.app.cli trade positions         # açık pozisyonlar (--all: kapanmışlar da)
+python -m src.app.cli trade pending            # onay bekleyen niyetler (confirm modu)
+python -m src.app.cli trade approve 3          # bir niyeti onayla → emir
+python -m src.app.cli trade reject 3           # bir niyeti reddet
+python -m src.app.cli trade close BTC/USDT     # bir pozisyonu market kapat
+python -m src.app.cli trade panic              # ACİL: tüm pozisyonları kapat + niyetleri reddet
+
+# CANLI (yalnız üçlü kilitle; küçük allocation_quote_cap ile başlayın)
+#   .env: LIVE_TRADING=1   ·   config: execution.mode: live, enabled: true
+python -m src.app.cli watch --execute --live
+```
+
+**Önerilen yol:** paper → testnet → küçük canlı. Backtest geçmişi canlıda kayma/gecikme/kısmi
+dolumla farklılaşır; kill-switch ve %5 stop zararı sınırlar ama **sıfırlamaz**. Sorumluluk kullanıcıdadır.
+
 ## Binance API kurulumu (opsiyonel)
 
 1. Genel piyasa verisi (OHLCV/fiyat) için **anahtar gerekmez** — bot anahtarsız çalışır.
-2. Anahtar kullanılacaksa: Binance > API Management > yeni anahtar.
-   **"Enable Reading" AÇIK; "Spot/Futures Trading" ve "Withdrawals" KAPALI.** IP kısıtlaması ekleyin.
-3. Anahtarları yalnızca `.env`'e koyun; repoya asla commit etmeyin.
+2. Yalnız veri/analiz için anahtar: **"Enable Reading" AÇIK; "Spot/Futures Trading" ve "Withdrawals" KAPALI.**
+3. **CANLI otonom işlem** için: **"Enable Spot Trading" AÇIK; "Withdrawals" KAPALI** + **IP whitelist** zorunlu.
+4. Testnet için ayrı anahtar: https://testnet.binance.vision → `BINANCE_TESTNET_API_KEY/SECRET`.
+5. Anahtarları yalnızca `.env`'e koyun; repoya asla commit etmeyin (loglanmaz).
 
 ## Mimari (adaptör deseni)
 
@@ -292,15 +353,18 @@ AnalysisEngine ─> Strategy (ABC) ─> EmaRsi / Confluence / Ml / Ensemble
         │  Signal / AnalysisResult     (+ RegimeFilteredStrategy sarmalayıcı: rejim kapılama)
         │                              (opsiyonel ConfidenceCalibrator ile güven kalibrasyonu)
         ├──> Notifier (konsol / Telegram)
-        └──> Storage (SQLite: sinyaller + sonuçlar + tezler)
+        └──> Storage (SQLite: sinyaller + sonuçlar + tezler + emirler/pozisyonlar)
                   ▲
    Öğrenme: src/learning (evaluator → stats → calibrator/coach)  ←  src/core/simulate
    Rejim:   src/core/regime (trend + breadth)   ·   Pair: src/strategies/pairs (cointegration)
+   Otonom:  src/execution (OrderExecutor ABC: Paper/BinanceSpot + RiskManager + ExecutionManager)
+            watch --execute / trade  →  factory üçlü kilit  →  emir + koruyucu stop + DB (exec_*)
 Tetikleyici: CLI komutu  veya  watch scheduler   ·   Claude Skills: .claude/skills/
 ```
 
 `AnalysisEngine` ve `Strategy` yalnızca **arayüzlere** bağımlıdır; somut Binance sınıfını
-import etmez. Çekirdeğe `if market == "crypto"` mantığı sızmaz.
+import etmez. Çekirdek/strateji **execution modülünü import etmez** — yalnız watch döngüsü
+(`scheduler`) kullanır; `OrderExecutor` ABC sayesinde paper/testnet/live aynı arayüzle eklenir.
 
 ## ABD hisse senedi desteği (eklendi)
 

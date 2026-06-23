@@ -6,7 +6,8 @@ description: Bir sembolü (kripto BTC/USDT veya hisse AAPL) analizbot ile analiz
 # crypto-analyze
 
 analizbot CLI'sini çağırıp tek bir sembol için gerekçeli sinyal üretir ve sonucu
-sade Türkçe yorumlarsın. Bot **read-only** karar-destek aracıdır; gerçek emir göndermez.
+sade Türkçe yorumlarsın. Bu skill **read-only** karar-destektir; emir göndermez.
+(Otonom işlem ayrı: `watch --execute` / `trade`, açıkça etkinleştirilince.)
 
 ## Nasıl çalıştırılır
 Proje kökünden (`C:\Users\arsla\Desktop\analizbot`) venv Python'u ile:

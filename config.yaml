@@ -11,7 +11,7 @@ watchlist:
   - SOL/USDT
 
 timeframe: 1h                 # varsayılan mum periyodu
-scan_interval_minutes: 15     # watch modu kaç dakikada bir tarar
+scan_interval_minutes: 5      # watch modu kaç dakikada bir tarar (5dk: dengeli; çok kısa = rate-limit)
 active_strategy: ensemble     # backtest karşılaştırmasında en iyi çıkan strateji
 
 # Strateji parametreleri (spec §6). EmaRsiStrategy bunları okur.
@@ -193,4 +193,26 @@ learning:
 # Bildirim kanalları
 notify:
   console: true              # her zaman açık
-  telegram: false            # .env'de token varsa true yap
+  telegram: true             # .env'de TELEGRAM_BOT_TOKEN + CHAT_ID varsa devreye girer
+
+# ===================== OTONOM İŞLEM (Binance Spot) =====================
+# GÜVENLİK ÖNCELİKLİ. Bot bu bölüm açılana dek READ-ONLY'dir (gerçek emir yok).
+# Üç kademe: paper (simülasyon, API yok — VARSAYILAN) · testnet (sahte para) · live.
+# CANLI için ÜÇLÜ KİLİT şart: .env LIVE_TRADING=1 + mode: live + CLI --live.
+# Ayrıca emir vermek için: enabled: true + `watch --execute`.
+execution:
+  enabled: true             # ana şalter (watch --execute de gerekir)
+  mode: paper                # paper | testnet | live
+  decision: confirm          # confirm (onaylı) | auto (otonom)
+  market: spot               # şimdilik spot (futures sonra)
+  timeframe: 4h              # işlem için önerilen (scalping'ten kaçın)
+  risk_per_trade_pct: 1.0    # korumacı: işlem başı riske atılan sermaye %'i
+  stop_loss_pct: 5.0         # KORUYUCU STOP %5 (borsaya STOP_LOSS_LIMIT konur)
+  take_profit_pct: 10.0      # sinyal TP yoksa kullanılır (R:R ~1:2)
+  max_position_pct: 20       # tek pozisyon, sermaye %'i
+  max_total_exposure_pct: 40 # tüm açık pozisyonlar toplamı
+  max_concurrent_positions: 2
+  max_daily_loss_pct: 3.0    # kill-switch: günlük zarar bunu aşarsa yeni giriş yok
+  min_order_usdt: 11         # Binance min notional ~10 + emniyet
+  cooldown_minutes: 60       # aynı sembolde işlemler arası bekleme
+  allocation_quote_cap: 0    # 0 = serbest USDT bakiyesi; >0 = bu tutarla sınırla (canlıda küçük tut)
