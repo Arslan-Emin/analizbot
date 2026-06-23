@@ -9,9 +9,13 @@
 # .env'i KURMAZ ve servisi BAŞLATMAZ (onları rehber adımları yapar — secrets güvenliği).
 set -euo pipefail
 
+# root isek sudo gereksiz; değilsek sudo kullan (Contabo'da sudo kurulu olmayabilir).
+SUDO=""
+if [ "$(id -u)" -ne 0 ]; then SUDO="sudo"; fi
+
 echo "==> Sistem paketleri kuruluyor..."
-sudo apt-get update -y
-sudo apt-get install -y python3-venv python3-pip git libgomp1
+${SUDO} apt-get update -y
+${SUDO} apt-get install -y python3-venv python3-pip git libgomp1
 
 PYVER="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
 echo "==> Python sürümü: ${PYVER}"
@@ -30,7 +34,7 @@ RUN_USER="$(whoami)"
 SERVICE_FILE="/etc/systemd/system/analizbot.service"
 
 echo "==> systemd servisi yazılıyor: ${SERVICE_FILE}"
-sudo tee "${SERVICE_FILE}" >/dev/null <<EOF
+${SUDO} tee "${SERVICE_FILE}" >/dev/null <<EOF
 [Unit]
 Description=analizbot Telegram trading bot
 After=network-online.target
@@ -50,7 +54,7 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
 
-sudo systemctl daemon-reload
+${SUDO} systemctl daemon-reload
 
 cat <<'NEXT'
 
